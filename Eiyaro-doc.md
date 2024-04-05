@@ -220,7 +220,7 @@ The architecture of Eiyaro is designed as follows:
  ***1. Nodes discovery***
 
 ​	Nodes discovery of P2P network mainly aims to solve how the new node join the network of Eiyaro, which requires the new node can be known by other nodes as soon as possible, and gets information from other nodes as well. The Eiyaro nodes discovery uses Kademli, which is a overlay network with a specific structure of the P2P network. Each node is identified by a number or node ID, which is stored in each node. Kademlia stores nodes in the k-buckets, and every node just connects with the n closest nodes to form the topological structure of network as follows : 
-![EIYARO-Node](https://github.com/EIYARO/ey-book/blob/image/node_01.png)
+![EIYARO-Node](https://github.com/EIYARO/ey-book/tree/main/image/node_01.png)
 
 
 
