@@ -367,4 +367,452 @@ $ ./eiyarocli set-mining true
 * Use eiyarocli to set the parameter for mining to true. eiyarocli will interact with eiyarod and the node starts mining. Similarly, set the parameter to false to turn off mining.
 
 
+# Chapter 02 Interactive Tools
 
+## 2.1 Introduction 
+
+​	Eiyarocli and dashboard are two Eiyaro tools to interact with eiyarod. Eiyarocli is a command line tool and dashboard is a more user friendly Web Application. Both of them use RPC protocol to interact with eiyarod process.
+
+​	Any operation related to tokens, accounts, transactions, wallets, mining, etc. can be managed by these interactive tools. 
+
+​	In this chapter, we will analyze the ideas and code behind eiyarocli and eiyarod and briefly introduce dashboard.
+
+
+
+## 2.2 Eiyarocli 
+
+### 2.2.1 Commandline arguments for Eiyarocli  
+
+​	There are two ways to use eiyarocli. 
+​	1. Using the `flag` (eiyarocli [flags]). Use `-h` to open help. 
+​	2. Using a sub-command (eiyarocli [command]). All sub-commands can be seen by `-h` or `-help`. The help section is pretty detailed, useful and easy to understand.
+
+
+```
+$ ./eiyarocli -h
+Eiyarocli is a commond line client for eiyaro core (a.k.a. eiyarod)
+
+Usage:
+  eiyarocli [flags]
+  eiyarocli [command]
+
+Available Commands:
+  build-transaction             
+  check-access-token            
+  create-access-token           
+  create-account                
+  create-account-receiver       
+  create-asset                  
+  create-key                  
+  create-transaction-feed     
+  decode-program                
+  decode-raw-transaction        
+  delete-access-token       
+  delete-account               
+  delete-key                 
+  delete-transaction-feed      
+  estimate-transaction-gas      
+  gas-rate                      
+  get-asset                  
+  get-block                     
+  get-block-count               
+  get-block-hash              
+  get-block-header              
+  get-difficulty                
+  get-hash-rate                
+  get-transaction             
+  get-transaction-feed        
+  get-unconfirmed-transaction   
+  help                          
+  is-mining                     
+  list-access-tokens            
+  list-accounts                 
+  list-addresses               
+  list-assets                
+  list-balances                
+  list-keys                   
+  list-pubkeys                  
+  list-transaction-feeds    
+  list-transactions             
+  list-unconfirmed-transactions 
+  list-unspent-outputs         
+  net-info                      
+  rescan-wallet                 
+  reset-key-password            
+  set-mining                    
+  sign-message                
+  sign-transaction             
+  submit-transaction           
+  update-asset-alias            
+  update-transaction-feed      
+  validate-address             
+  verify-message             
+  version                     
+  wallet-info                 
+```
+
+​	The following sections will cover how to use sub-commands
+
+
+
+### 2.2.2 Use Eiyarocli to View Nodes 
+
+​	Use `net-info` to get the information about running Eiyaro node.
+​	Run `eiyarocli net-info -h` to get help information.
+
+
+```
+$ ./eiyarocli net-info -h
+Print the summary of network
+Usage:
+  eiyarocli net-info [flags]
+Flags:
+  -h, --help   help for net-info
+```
+
+​	You can see that `net info` is very simple and has only one flag `-h`.
+
+
+```
+$ ./eiyarocli net-info
+{
+  "current_block": 36714,
+  "highest_block": 36714,
+  "listening": true,
+  "mining": false,
+  "network_id": "mainnet",
+  "peer_count": 10,
+  "syncing": false,
+  "version": "1.0.5+2bc2396a"
+}
+```
+
+​	Description of the response :
+
+* current_block：The height of the current block is 36714 on this node.
+* highest_block：The highest block of the network is 36714, which means the node has all generated blocks.
+* listening：Whether the node is listening to the network.
+* mining：Whether the node is mining.
+* network_id：Identify the type of network (mainnet, wisdom, solonet) this node is listening to.
+* peer_count：Show the number of other nodes it connect.
+* syncing：Whether the node is syncsynchronizing or not.
+* version：The eiyaro version this node is running.
+
+
+
+### 2.2.3 Eiyarocli Sub-command example 
+
+​	In this section, we will analyze `net-info` part of eiyarocli code. Other sub-commands also follow the same pattern.
+
+​	Here is the structure of eiyarocli code.
+
+
+```
+$ tree cmd/eiyarocli/
+cmd/eiyarocli/
+├── eiyarocli
+├── commands			
+│   ├── accesstoken.go		
+│   ├── account.go		
+│   ├── asset.go			
+│   ├── block.go			
+│   ├── eiyarocli.go	
+│   ├── key.go			
+│   ├── mining.go		
+│   ├── net.go			
+│   ├── program.go	
+│   ├── template.go		
+│   ├── transaction.go		
+│   ├── txfeed.go	
+│   ├── util.go			
+│   ├── version.go	
+│   └── wallet.go		
+└── main.go			
+```
+
+***1. Introduction to Cobra ***
+
+​		Eiyarocli is based on Cobra. Cobra is both a library for creating powerful modern CLI (command-line interface) applications as well as a program to generate scaffolding for commandline applications and related command files. Many of the most widely used Go projects such as Kubernetes, docker, etcd, etc also use Cobra.
+
+
+​	Cobra is built on a structure of commands, arguments & flags.Commands is the central point of the application. Each interaction that the application supports will be contained in a Command. A command can have children commands and optionally run an action.Args are things and Flags are modifiers for those actions. A flag is a way to modify the behavior of a command. Cobra supports fully POSIX-compliant flags as well as the Go flag package. A Cobra command can define flags that persist through to children commands and flags that are only available to that command.
+
+​	Here is an example to show how to create a CLI using Cobra:
+
+
+***（1）Installing Cobra***
+
+​	Using Cobra is easy. First, use `go get` to install the latest version of the library. This command will install the `cobra` generator executable along with the library and it's dependencies. After installing, you can find cobra in `GOPATH/bin`.
+
+
+```
+$ go get -v github.com/spf13/cobra/cobra
+```
+
+***（2）Using Cobra to build an application***
+
+​	We are now going to create a command line program named `demo`. Open the terminal, navigate to `GOPATH/src`, and run the following command:
+
+
+
+```
+$ cobra init demo 
+```
+
+​	There will be a `demo` under `GOPATH/src` as follows:
+
+
+```
+$ tree demo/
+demo/
+├── LICENSE
+├── cmd
+│   └── root.go
+└── main.go
+```
+
+​	This program does not have any sub commands. We can add sub commands later if our applicaiton needs it.
+
+​	​To add a bit more functionality, Open `main.go`:
+
+
+```
+package main
+
+import "demo/cmd"
+
+func main() {
+    cmd.Execute()
+}
+```
+
+​	The `main()` function runs `Execute()`, which is defined in `demo/cmd/root.go`. `root.go` file has some initial imports and the function definition for `Execute`. Cobra creates many imports by default but all of them are not necessary. For eg. `viper`, it is a library for reading configuration files. We can comment it out since we don't intend to use it here. If we don't comment it out, this will be a 10MB application.
+
+​	Create a new file `imp.go` in `demo` and copy these contents:
+
+
+```
+package imp
+
+import(
+    "fmt"
+)
+
+func Show(name string, age int) {
+    fmt.Printf("My Name is %s, My age is %d\n", name, age)
+}
+```
+
+​	In `imp.go`, `show()` has two arguments: `name` and `age`, which are printed by `fmt`. The `demo` directory now looks as follows:
+
+
+```
+$ tree demo/
+demo/
+├── LICENSE
+├── cmd
+│   └── root.go
+├── imp
+│   ├── imp.go
+└── main.go
+```
+
+​	All Cobra commands need to be defined by GO struct `cobra.Command`. To implement `demo`, we shall make some changes to RootCmd in `demo/cmd/root.go`.
+
+
+```
+var RootCmd = &cobra.Command{
+    Use:   "demo",
+    Short: "A test demo",
+    Long:  `Demo is a test appcation for print things`,
+    // Uncomment the following line if your bare application
+    // has an action associated with it:
+    Run: func(cmd *cobra.Command, args []string) {
+        if len(name) == 0 {
+            cmd.Help()
+            return
+        }
+        imp.Show(name, age)
+    },
+}
+```
+
+​	Here, we defined `RootCmd` as a `Command` struct with an impementation for `Run` function, and this function will be executed by `Execute` method. We still need to parse command line arguments before actually running the command's `Run` method and that is done in `init()` function in cmd package. `init()` has higher priority than `main()` and will be executed by default after each package initializes. `init()` is usually used to initialize variables. Here we use `init()` to parse command line arguments before `main()`.
+
+​	Make the following changes in `demo/cmd/root.go`:
+
+
+```
+var (
+    name string
+    age  int
+)
+
+func init() {
+    RootCmd.Flags().StringVarP(&name, "name", "n", "", "person's name")
+    RootCmd.Flags().IntVarP(&age, "age", "a", 0, "person's age")
+}
+```
+
+​	We can run `demo` from command line now:
+
+
+```
+$ go run main.go
+Usage:
+  demo [flags]
+
+Flags:
+  -a, --age int         person's age
+      --config string   config file (default is $HOME/.demo.yaml)
+  -h, --help            help for demo
+  -n, --name string     person's name
+  -t, --toggle          Help message for toggle
+```
+
+​	If we want to create a CLI application with sub commands, just need to run `cobra add` to add sub commands to it. Here we add a sub command `server` as follows:
+
+
+```
+$ cd demo
+$ cobra add server
+```
+
+​	This will add a file `server.go` in `demo/cmd/` :
+
+
+```
+$ tree demo/
+demo/
+├── LICENSE
+├── cmd
+│   ├── root.go
+│   └── server.go
+├── imp
+│   └── imp.go
+└── main.go
+```
+
+​	We now configure the `server` just like we did in `root.go`. Here it is : 
+
+
+```
+$ go run main.go
+Usage:
+  demo [flags]
+  demo [command]
+
+Available Commands:
+  help        Help about any command
+  server      A brief description of your command
+
+Flags:
+  -a, --age int         person's age
+      --config string   config file (default is $HOME/.demo.yaml)
+  -h, --help            help for demo
+  -n, --name string     person's name
+  -t, --toggle          Help message for toggle
+
+Use "demo [command] --help" for more information about a command.
+```
+
+
+
+***2.eiyarocli design***
+
+
+​	In the last section, we looked at how to use Cobra to create a CLI application. With a good understanding of how Cobra works, it is easy to read the rest of eiyarocli code. Just like in the `demo` command application, eiyarocli also runs `cmd.Execute()` in the main function at the start of the eiyarocli application. `cmd.Execute()` calls the `Execute()` method from the package named `commands. cmd` is just another name given to package `commands` when it is imported into `main.go`.
+
+
+```
+cmd/eiyarocli/main.go
+func main() {
+    runtime.GOMAXPROCS(runtime.NumCPU())
+    cmd.Execute()
+}
+```
+
+​	When the program runs `cmd.Execute()`, it first runs `init()` function in `commands` to parse command line arguments. After that, `Execute()` will be run. In `Execute()`, `AddCommands()` s run first and this adds sub commands to Eiyarocli Cmd, while `AddTemplateFunc()` is for adding templates to sub commands. After these (`init()`,`AddCommands()` ,`AddTemplateFunc()`) are run, it will start to execute the commands. When running Eiyarocli `cmd.Execute()`, Cobra will jump into the sub commands given by the user at command input and run its `Run`.
+
+
+```
+cmd/eiyarocli/commands/eiyarocli.go
+func Execute() {
+
+    AddCommands()
+    AddTemplateFunc()
+
+    if _, err := EiyarocliCmd.ExecuteC(); err != nil {
+        os.Exit(util.ErrLocalExe)
+    }
+}
+```
+
+​	Here we take `create-access-token` as the example to analyze what its `Run` does. It takes `arg[0]` as tokenID, then calls `ClientCall` in `util` to get the path of `/create-access-token` and sends tokenID to create a new token.
+
+
+```
+eiyaro/cmd/eiyarocli/commands/accesstoken.go
+var createAccessTokenCmd = &cobra.Command{
+    Use:   "create-access-token <tokenID>",
+    Short: "Create a new access token",
+    Args:  cobra.ExactArgs(1),
+    Run: func(cmd *cobra.Command, args []string) {
+        var token accessToken
+        token.ID = args[0]
+
+        data, exitCode := util.ClientCall("/create-access-token", &token)
+        if exitCode != util.Success {
+            os.Exit(exitCode)
+        }
+        printJSON(data)
+    },
+}
+```
+
+​	`ClientCall` encapsulates a RPC client, which can compose requests based on path and arguments given by the caller and parse the response from RPC server.
+
+
+```
+eiyaro/util/util.go
+func ClientCall(path string, req ...interface{}) (interface{}, int) {
+
+    var response = &api.Response{}
+    var request interface{}
+
+    if req != nil {
+        request = req[0]
+    }
+
+    client := MustRPCClient()
+    client.Call(context.Background(), path, request, response)
+
+    switch response.Status {
+    case api.FAIL:
+        jww.ERROR.Println(response.Msg)
+        return nil, ErrRemote
+    case "":
+        jww.ERROR.Println("Unable to connect to the eiyarod")
+        return nil, ErrConnect
+    }
+
+    return response.Data, Success
+}
+```
+
+​	The `create-access-token` completes its execution path after the response is displayed.
+
+
+
+## **2.3  Interactive Dashboard**
+
+​	​Eiyaro Dashboard is a seperate project available here.(https://github.com/EIYARO/ey-dashboard). Compiled and compressed version of Dashboard is hard-coded in eiyarod and you can find it's code in `dashboard/dashboard.go`. The `hanlder` information is in `api/api.go`.
+
+
+```
+mux := http.NewServeMux()
+mux.Handle("/dashboard/", http.StripPrefix("/dashboard/", static.Handler{
+	Assets:  dashboard.Files,
+	Default: "index.html",
+}))
+```
