@@ -367,7 +367,7 @@ $ ./eiyarocli set-mining true
 * Use eiyarocli to set the parameter for mining to true. eiyarocli will interact with eiyarod and the node starts mining. Similarly, set the parameter to false to turn off mining.
 
 
-# Chapter 02 Interactive Tools
+# 02 Interactive Tools
 
 ## 2.1 Introduction 
 
@@ -816,7 +816,9 @@ mux.Handle("/dashboard/", http.StripPrefix("/dashboard/", static.Handler{
 	Default: "index.html",
 }))
 ```
-# Chapter 03 Initialization, Starting and Stopping eiyarod
+
+
+#  03 Initialization, Starting and Stopping eiyarod
 
 ## 3.1 
 
