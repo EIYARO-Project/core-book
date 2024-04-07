@@ -816,3 +816,742 @@ mux.Handle("/dashboard/", http.StripPrefix("/dashboard/", static.Handler{
 	Default: "index.html",
 }))
 ```
+# Chapter 03 Initialization, Starting and Stopping eiyarod
+
+## 3.1 
+
+​	Before you run eiyaro node for the first time, we will need to initialize eiyaro node by defining configuration parameters for network, database location etc.
+
+
+
+* eiyarod Commandline flags
+* eiyarod Initialization along with initialization of different modules
+* eiyarod Daemon.
+
+
+
+
+
+## 3.2 eiyarod Commandline flags
+
+​	Commandline programs accept input arguments. Programming lanaguages offer functions and libraries to parse these input arguments. In GoLang, 'flag' package handles parsing the input arguments. Sub-commands and other parameters supported by eiyarod are as follows: 
+
+
+```
+$ ./eiyarod -h
+Multiple asset management.
+
+Usage:
+  eiyarod [command]
+
+Available Commands:
+  help        
+  init        
+  node       
+  version     
+
+coral[coralmac] eiyarod $ ./eiyarod node -h
+Run the eiyarod
+
+Usage:
+  eiyarod node [flags]
+
+Flags:
+      --auth.disable                Disable rpc access authenticate
+      --chain_id string             Select network type
+  -h, --help                        Help for node
+      --log_file string             Select file to log
+      --log_level string            Select level of log
+      --mining                      Enable mining
+      --p2p.dial_timeout int        Set dial timeout (default 3)
+      --p2p.handshake_timeout int   Set handshake timeout (default 30)
+      --p2p.laddr string            Node listen address.
+      --p2p.max_num_peers int       Set max num peers (default 50)
+      --p2p.pex                     Enable Peer-Exchange  (default true)
+      --p2p.seeds string            Comma delimited host:port seed nodes
+      --p2p.skip_upnp               Skip UPNP configuration
+      --prof_laddr string           Use http to profile eiyarod programs
+      --simd.enable                 Enable simd, which is used to optimize Tensority
+      --vault_mode                  Run in the offline enviroment
+      --wallet.disable              Disable wallet
+      --wallet.rescan               Rescan wallet
+      --web.closed                  Lanch web browser or not
+
+Global Flags:
+      --home string   Root directory for config and data
+      --trace         Enable trace and show information bout stack when something going wrong
+```
+
+## 3.3 Eiyaro Daemon
+
+​	Daemon is a sepecial process, which keeps on running in the background after it starts and it does not stop until it receives a `kill term` signal.
+
+​	eiyarod and eiyarocli both use Cobra library to handle command line input so we will skip that part here and look into other details of eiyaro daemon.
+
+
+```
+$ tree cmd/eiyarod/
+cmd/eiyarod/
+├── eiyarod
+├── commands
+│   ├── init.go	     Initialize the network of the node
+│   ├── root.go		   The directory of root
+│   ├── run_node.go  node deamon
+│   └── version.go	 node version
+├── main.go		
+
+```
+
+## 3.4 eiyarod Initialization
+
+​	Eiyaro daemon initializes different modules based on input flags passed to it. This line of `code node.NewNode(config)` starts the functionality of a eiyaro node.
+
+
+
+### 3.4.1 Node
+
+```
+node/node.go
+type Node struct {
+	cmn.BaseService
+ 
+	// config
+	config *cfg.Config
+ 
+	syncManager *netsync.SyncManager
+ 
+	wallet       *w.Wallet
+	accessTokens *accesstoken.CredentialStore
+	api          *api.API
+	chain        *protocol.Chain
+	txfeed       *txfeed.Tracker
+	cpuMiner     *cpuminer.CPUMiner
+	miningPool   *miningpool.MiningPool
+	miningEnable bool
+}
+```
+
+​	Description of `Node`:
+
+- cmn.BaseService：Service management
+- config：Global configuration of the node
+- syncManager：Synchronization of transactions and blocks
+- wallet：Local wallet management
+- accessTokens：Token management, user's access credentials
+- api：Api Server
+- chain：Local chain
+- txfeed：Not be used
+- cpuMiner：cpu mining
+- miningPool：mining pool
+- miningEnable：Enable mining
+
+
+​	`node.NewNode(config)` creates a new `Node`, which contains all the functionality of eiyarod.
+
+​	`cmn.BaseService` is a service management framwork based on tendermint.  `Node` object calls these methods `OnStart/OnStop/IsRunning` on BaseService in order to manage node lifecycle. Tendermint ensures these operations are not run repeatedly.
+
+
+### 3.4.2 Configuration 
+​	Config variable is initialized with default configuration before running `node.NewNode(config)`. Here we will describe the default configuration in detail:
+
+
+ cmd/eiyarod/commands/root.go
+
+```
+config = cfg.DefaultConfig()
+```
+
+​	Eiyaro daemon defines a global variable named `config`, which represents eiyaro daemon configuration and is set by default when daemon starts.
+
+
+config/config.go
+
+```
+func DefaultConfig() *Config {
+	return &Config{
+		BaseConfig: DefaultBaseConfig(),
+		P2P:        DefaultP2PConfig(),
+		Wallet:     DefaultWalletConfig(),
+		Auth:       DefaultRPCAuthConfig(),
+		Web:        DefaultWebConfig(),
+		Simd:       DefaultSimdConfig(),
+	}
+}
+```
+
+​	There are six default arguments for different modules. We can divide them into three groups: BaseConfig, P2PConfig and other configuration.
+
+
+ 
+
+***（1）BaseConfig  ***
+
+​	BaseConfig includes data directory, log level, listening address and other relevant configuration.
+
+
+config/config.go
+
+```
+type BaseConfig struct {
+	RootDir string `mapstructure:"home"` 		// The root directory for all data.
+	ChainID string `mapstructure:"chain_id"` 	// The ID of the network to json. There are three options: mainnet,testnet and solonet
+	LogLevel string `mapstructure:"log_level"` 	// log level to set
+	PrivateKey string `mapstructure:"private_key"` 	// A JSON file containing the private key to use as a validator in the consensus protoco
+	Moniker string `mapstructure:"moniker"` 	// A custom human readable name for this node(default anonymous) 
+	ProfListenAddress string `mapstructure:"prof_laddr"` 	// TCP or UNIX socket address for the profiling server to listen on.(default disabled)
+	FastSync bool `mapstructure:"fast_sync"` 	// Fast synchronization(default enabled)
+	Mining bool `mapstructure:"mining"`		 // Mining.(default disabled)
+	FilterPeers bool `mapstructure:"filter_peers"` // not be used(default false)
+	TxIndex string `mapstructure:"tx_index"` 	// not be used
+	DBBackend string `mapstructure:"db_backend"` // Database backend: leveldb | memdb
+	DBPath string `mapstructure:"db_dir"` 		// Database directory
+	KeysPath string `mapstructure:"keys_dir"` 	// Keystore directory
+	HsmUrl string `mapstructure:"hsm_url"` 		// not be used
+	ApiAddress string `mapstructure:"api_addr"` 	// Address of Api Server(default 0.0.0.0:9888)
+	VaultMode bool `mapstructure:"vault_mode"`    // No network
+	Time time.Time 			// not be used
+	LogFile string `mapstructure:"log_file"` // log file name
+```
+
+​	`config/toml.go` file provides some default arguments for configuration. e.g, APIAddress is read form `api_addr` value in config file.
+
+
+config/toml.go
+
+```
+var defaultConfigTmpl = `# This is a TOML config file.
+fast_sync = true
+db_backend = "leveldb"
+api_addr = "0.0.0.0:9888"
+`
+var mainNetConfigTmpl = `chain_id = "mainnet"
+[p2p]
+laddr = "tcp://0.0.0.0:46657"
+seeds = "xxx.xxx.xxx.xxx:46657"
+`
+```
+
+***（2）P2PConfig ***
+
+​	P2PConfig is used in P2P protocol. It includes local listening ports, dial timeout and address book, etc.
+
+
+
+config/config.go
+
+```
+type P2PConfig struct {
+	RootDir          string `mapstructure:"home"` 	
+	ListenAddress    string `mapstructure:"laddr"` 	// tcp://0.0.0.0:46656
+	Seeds            string `mapstructure:"seeds"` 	//
+	SkipUPNP         bool   `mapstructure:"skip_upnp"` 	// false
+	AddrBook         string `mapstructure:"addr_book_file"` 	//peer
+	AddrBookStrict   bool   `mapstructure:"addr_book_strict"` 	
+	PexReactor       bool   `mapstructure:"pex"` 		
+	MaxNumPeers      int    `mapstructure:"max_num_peers"`	 // 50
+	HandshakeTimeout int    `mapstructure:"handshake_timeout"` 	// 30s
+	DialTimeout      int    `mapstructure:"dial_timeout"` 	// 3s
+}
+```
+
+***Note***: In Bitcoin, nodes use DNS to find seed node and query it to get the IP addresses of other nodes. In Eiyaro, seed node IP addresses are hard coded into the code. We will explain this in more detail in ***Chapter10 P2P Network***.
+
+
+
+
+***（3）Other Configuration***
+
+​	WalletConfig is used to configure the local wallet. It includes a flag to enable or disable the wallet functionality and another flag to rescan the entire wallet.
+
+
+
+config/config.go
+
+```
+type WalletConfig struct {
+	Disable bool `mapstructure:"disable"`	// Enable the local wallet(default false) 
+	Rescan  bool `mapstructure:"rescan"`	// Rescan the wallet
+}
+
+type RPCAuthConfig struct {
+	Disable bool `mapstructure:"disable"` // Enable the authorization of Api Server(default false)
+}
+
+type WebConfig struct {
+	Closed bool `mapstructure:"closed"` // Start eiyaro-dashboard(default false)
+}
+
+type SimdConfig struct {
+	Enable bool `mapstructure:"enable"` // Enable the optimization of Tenaority CPU
+}
+```
+
+​	After declaring `config = DefaultConfig()`, `init()` method will assign the config attributes. Here is the code:
+
+
+
+cmd/eiyarod/commands/run_node.go
+
+```
+func init() {
+	runNodeCmd.Flags().String("prof_laddr", config.ProfListenAddress, "Use http to profile eiyarod programs")
+	runNodeCmd.Flags().Bool("mining", config.Mining, "Enable mining")
+
+	runNodeCmd.Flags().Bool("simd.enable", config.Simd.Enable, "Enable SIMD mechan for tensority")
+
+	runNodeCmd.Flags().Bool("auth.disable", config.Auth.Disable, "Disable rpc access authenticate")
+
+	runNodeCmd.Flags().Bool("wallet.disable", config.Wallet.Disable, "Disable wallet")
+	runNodeCmd.Flags().Bool("wallet.rescan", config.Wallet.Rescan, "Rescan wallet")
+	runNodeCmd.Flags().Bool("vault_mode", config.VaultMode, "Run in the offline enviroment")
+	runNodeCmd.Flags().Bool("web.closed", config.Web.Closed, "Lanch web browser or not")
+	runNodeCmd.Flags().String("chain_id", config.ChainID, "Select network type")
+
+	// log level
+	runNodeCmd.Flags().String("log_level", config.LogLevel, "Select log level(debug, info, warn, error or fatal")
+
+	// p2p flags
+	runNodeCmd.Flags().String("p2p.laddr", config.P2P.ListenAddress, "Node listen address. (0.0.0.0:0 means any interface, any port)")
+	runNodeCmd.Flags().String("p2p.seeds", config.P2P.Seeds, "Comma delimited host:port seed nodes")
+	runNodeCmd.Flags().Bool("p2p.skip_upnp", config.P2P.SkipUPNP, "Skip UPNP configuration")
+	runNodeCmd.Flags().Bool("p2p.pex", config.P2P.PexReactor, "Enable Peer-Exchange ")
+	runNodeCmd.Flags().Int("p2p.max_num_peers", config.P2P.MaxNumPeers, "Set max num peers")
+	runNodeCmd.Flags().Int("p2p.handshake_timeout", config.P2P.HandshakeTimeout, "Set handshake timeout")
+	runNodeCmd.Flags().Int("p2p.dial_timeout", config.P2P.DialTimeout, "Set dial timeout")
+
+	// log flags
+	runNodeCmd.Flags().String("log_file", config.LogFile, "Log output file")
+
+	RootCmd.AddCommand(runNodeCmd)
+}
+```
+
+​	In `init()` method, there are many different types of flag which are bound to `config`. Here is an example: 
+
+
+
+```
+runNodeCmd.Flags().Bool("mining", config.Mining, "Enable mining")
+```
+
+​	Description of the above code:
+
+* Define a flag argument, which is Bool
+* The name of this flag is mining
+* This flag value will be assigned to `config.Mining`
+* The description of this flag is `Enable mining`
+
+
+​	This concludes the initialization of eiyaro daemon configuration.
+
+
+
+
+### 3.4.3 Create File Lock
+
+​	In this section,  we will look into what happens after initializaiton is complete and the the program starts running.
+
+​	In Eiyaro, a data directory(specified by `--root`) can only be read and written by one eiyaro daemon at a time. That is because the LevelDB Key-Value store runs in a single process. If multiple processes write to the same file, the consistency of data cannot be ensured. To ensure only one process reads or writes the data file at a time, eiyaro uses a file lock.
+
+
+
+node/node.go
+
+```
+if err := lockDataDirectory(config); err != nil {
+	cmn.Exit("Error: " + err.Error())
+}
+
+func lockDataDirectory(config *cfg.Config) error {
+	_, _, err := flock.New(filepath.Join(config.RootDir, "LOCK"))
+	if err != nil {
+		return errors.New("datadir already used by another process")
+	}
+	return nil
+}
+```
+
+​	When eiyaro starts, `lockDataDirectory()` function use `flock` to create a `LOCK` file in the `RootDir` directory. If one eiyarod process locks the `inode` of a file during the start, then any other process which tries to start at the same time, will get an error message as defined in `errors.New` and this new process will exit failing to aquire the `LOCK`. flock is used for detecting if a eiyarod process is already running.
+
+
+​	There are three types of flock:
+
+* LOCK_SH：Shared lock. More than one process may hold a shared lock for a given file at a given time.
+* LOCK_EX：Exclusive lock. Only one process may hold an exclusive lock for a given file at a given time.
+* LOCK_UN：Remove an existing lock held by this process.
+
+
+​	The `flock` package uses an exclusive lock `LOCK_EX`, which means only one process may hold this lock for a given file at a given time. The code for flock is here:
+
+
+vendor/github.com/prometheus/prometheus/util/flock/flock_unix.go
+
+```
+func (l *unixLock) set(lock bool) error {
+	how := syscall.LOCK_UN
+	if lock {
+		how = syscall.LOCK_EX
+	}
+	return syscall.Flock(int(l.f.Fd()), how|syscall.LOCK_NB)
+}
+```
+
+
+
+### 3.4.4 Initialize Network type
+
+​	We have mentioned before that Eiyaro has three types of network, mainnet, testnet, solonet.
+
+
+node/node.go
+
+```
+initActiveNetParams(config)
+
+func initActiveNetParams(config *cfg.Config) {
+	var exist bool
+	consensus.ActiveNetParams, exist = consensus.NetParams[config.ChainID]
+	if !exist {
+		cmn.Exit(cmn.Fmt("chain_id[%v] don't exist", config.ChainID))
+	}
+}
+```
+
+​	Here `initActiveNetParams()` initializes the network according to the `chain_id` set in config. `consensus.ActiveNetParams()` object refers to the type of current network mode used in Eiyaro. The `consensus.ActiveNetParams` object is used all over the eiyaro code to identify what network this node is connected to.
+
+
+consensus/general.go
+
+```
+var ActiveNetParams = MainNetParams
+
+var NetParams = map[string]Params{
+	"mainnet": MainNetParams, 
+	"wisdom":  TestNetParams, 
+	"solonet": SoloNetParams,
+}
+
+var MainNetParams = Params{
+	Name:            "main",
+	Bech32HRPSegwit: "bm",
+	Checkpoints: []Checkpoint{
+		{10000, bc.NewHash([32]byte{0x93, 0xe1, 0xeb, 0x78, 0x21, 0xd2, 0xb4, 0xad, 0x0f, 0x5b, 0x1c, 0xea, 0x82, 0xe8, 0x43, 0xad, 0x8c, 0x09, 0x9a, 0xb6, 0x5d, 0x8f, 0x70, 0xc5, 0x84, 0xca, 0xa2, 0xdd, 0xf1, 0x74, 0x65, 0x2c})},
+		{20000, bc.NewHash([32]byte{0x7d, 0x38, 0x61, 0xf3, 0x2c, 0xc0, 0x03, 0x81, 0xbb, 0xcd, 0x9a, 0x37, 0x6f, 0x10, 0x5d, 0xfe, 0x6f, 0xfe, 0x2d, 0xa5, 0xea, 0x88, 0xa5, 0xe3, 0x42, 0xed, 0xa1, 0x17, 0x9b, 0xa8, 0x0b, 0x7c})},
+		{30000, bc.NewHash([32]byte{0x32, 0x36, 0x06, 0xd4, 0x27, 0x2e, 0x35, 0x24, 0x46, 0x26, 0x7b, 0xe0, 0xfa, 0x48, 0x10, 0xa4, 0x3b, 0xb2, 0x40, 0xf1, 0x09, 0x51, 0x5b, 0x22, 0x9f, 0xf3, 0xc3, 0x83, 0x28, 0xaa, 0x4a, 0x00})},
+		{40000, bc.NewHash([32]byte{0x7f, 0xe2, 0xde, 0x11, 0x21, 0xf3, 0xa9, 0xa0, 0xee, 0x60, 0x8d, 0x7d, 0x4b, 0xea, 0xcc, 0x33, 0xfe, 0x41, 0x25, 0xdc, 0x2f, 0x26, 0xc2, 0xf2, 0x9c, 0x07, 0x17, 0xf9, 0xe4, 0x4f, 0x9d, 0x46})},
+		{50000, bc.NewHash([32]byte{0x5e, 0xfb, 0xdf, 0xf5, 0x35, 0x38, 0xa6, 0x0b, 0x75, 0x32, 0x02, 0x61, 0x83, 0x54, 0x34, 0xff, 0x3e, 0x82, 0x2e, 0xf8, 0x64, 0xae, 0x2d, 0xc7, 0x6c, 0x9d, 0x5e, 0xbd, 0xa3, 0xd4, 0x50, 0xcf})},
+		{62000, bc.NewHash([32]byte{0xd7, 0x39, 0x8f, 0x23, 0x57, 0xf9, 0x4c, 0xa0, 0x28, 0xa7, 0x00, 0x2b, 0x53, 0x9e, 0x51, 0x2d, 0x3e, 0xca, 0xc9, 0x22, 0x59, 0xfc, 0xd0, 0x3f, 0x67, 0x1a, 0x0a, 0xb1, 0x02, 0xbf, 0x2b, 0x03})},
+	},
+}
+```
+
+​	`ActiveNetParams` uses mainnet parameters by default. The parameters of `MainNetParam` are as follows：
+
+* Bech32HRPSegw：Segregated Witness, an upgrade of protocol. See more details in Chapter05.
+* Checkpoints：Checkpoint has the height and hash of a block. This information is used to validate blocks when node runs in a fast synchronization mode. In general, when a main network is upgraded, the hardcoded information of checkpoints is also updated in the code.
+
+
+​	Checkpoints have two uses, one is to prevent forking, which means that the fork that was created before checkpoints will not be accepted by other nodes. This can also protect the network from 51% attack since attackers can't change transactions that happened before checkpoints. The other use is for fast synchronization between nodes, see more details in Chapter-10.
+
+
+
+### 3.4.5 Database Initialization 
+
+​	All data (blocks, transactions, etc.) on the blockchain needs to be stored in local K/V database once a pubilc blockchain is created. Eiyaro uses LevelDB as its database .
+
+
+node/node.go
+
+```
+coreDB := dbm.NewDB("core", config.DBBackend, config.DBDir())
+store := leveldb.NewStore(coreDB)
+```
+
+database/leveldb/store.go
+
+```
+type Store struct {
+	db    dbm.DB
+	cache blockCache
+}
+```
+
+​	`dbm` uses the db library from tendermint framework. `dbm.NewDB` returns a `DB` object, which provides the LevelDB implementation in GO along with many other functions related to memory mapping, the directory structure of file system etc.
+
+
+​	`dbm.NewDB` returns a `DB` object and needs three parameters: name of the db, key value store used by db (default is LevelDB) and the path to the db datastore. `leveldb.NewStore()` function returns a `Store` object, which is an encapsulation of LevelDB and implements functions related to blocks cache, blocks validation, blocks status, blocks query, etc. based on LevelDB.
+
+
+### 3.4.6 Transaction Pool Initialization
+
+​	When transactions are broadcast to the network, miners receive them and add them to local TxPool (transaction pool). Eiyaro TxPool is a limited buffer that can store upto 10,000 transactions by default. If the number of transactions is over 10,000, an error message "transaction pool reach the max number" will be returned.
+
+
+node/node.go
+
+```
+txPool := protocol.NewTxPool()
+
+protocol/txpool.go
+func NewTxPool() *TxPool {
+	return &TxPool{
+		lastUpdated: time.Now().Unix(),
+		pool:        make(map[bc.Hash]*TxDesc),
+		utxo:        make(map[bc.Hash]bc.Hash),
+		errCache:    lru.New(maxCachedErrTxs),
+		msgCh:       make(chan *TxPoolMsg, maxMsgChSize),
+	}
+}
+```
+
+​	`protocol.NewTxPool()` method returns  `TxPool` object. Here we only introduce the initialization of TxPool. The following chapters will cover the transaction pool in depth.
+
+
+### 3.4.7 Create a Local Blockchain 
+
+​	When the node starts for the first time, it will check the status of local persistent storage. If the status is not yet initialized, the node initializes the storage by adding the genesis block to the blockchain at height-0.
+
+
+node/node.go
+
+```
+chain, err := protocol.NewChain(store, txPool)
+if err != nil {
+	cmn.Exit(cmn.Fmt("Failed to create chain structure: %v", err))
+}
+```
+
+​	Here, `protocol.NewChain()`method returns a `Chain` object and needs two parameters store and txPool. The Chain object manages the entire Eiyaro blockchain.
+
+
+protocol/protocol.go
+
+```
+func NewChain(store Store, txPool *TxPool) (*Chain, error) {
+	c := &Chain{
+		orphanManage:   NewOrphanManage(),
+		txPool:         txPool,
+		store:          store,
+		processBlockCh: make(chan *processBlockMsg, maxProcessBlockChSize),
+	}
+	c.cond.L = new(sync.Mutex)
+
+	storeStatus := store.GetStoreStatus()
+	if storeStatus == nil {
+		if err := c.initChainStatus(); err != nil {
+			return nil, err
+		}
+		storeStatus = store.GetStoreStatus()
+	}
+
+	var err error
+	if c.index, err = store.LoadBlockIndex(); err != nil {
+		return nil, err
+	}
+
+	c.bestNode = c.index.GetNode(storeStatus.Hash)
+	c.index.SetMainChain(c.bestNode)
+	go c.blockProcesser()
+	return c, nil
+}
+```
+
+​	The `NewChain()` method runs these steps:
+
+（1） Instantiate  `Chain` object
+
+（2）`store.GetStoreStatus()` can get the storage stautus of local blockchain. If it is nil, the blockchain hasn't been initialized and so it runs `initChainStatus` to add the genesis block to initialize local blockchain.
+
+（3）`store.LoadBlockIndex()`  loads the block index and reads all `Block Header` information from database and caches the header information into memory to speed up block header lookups.
+
+（4）`c.index.SetMainChain` refers to the latest block the node has synchronized to local storage.
+
+（5）`go c.blockProcesser()` will start a go routine to update blocks information of local blockchain in storage. 
+
+
+### 3.4.8 Local Wallet Initialization
+
+​	The local wallet feature is enabled by default. Here is the code:
+
+
+node/node.go
+
+```
+hsm, err := pseudohsm.New(config.KeysDir())
+if err != nil {
+	cmn.Exit(cmn.Fmt("initialize HSM failed: %v", err))
+}
+
+if !config.Wallet.Disable {
+	walletDB := dbm.NewDB("wallet", config.DBBackend, config.DBDir())
+	accounts = account.NewManager(walletDB, chain)
+	assets = asset.NewRegistry(walletDB, chain)
+	wallet, err = w.NewWallet(walletDB, accounts, assets, hsm, chain)
+	if err != nil {
+		log.WithField("error", err).Error("init NewWallet")
+	}
+
+	// trigger rescan wallet
+	if config.Wallet.Rescan {
+		wallet.RescanBlocks()
+	}
+}
+```
+
+​	The code above is run when eiyaro node is start and runs the following steps:
+
+（1）Create `hsm` object, which manages keystore file that stores private key in JSON format. Keystore file is just a string produced by encrypting private key and need to be used along with wallet password.
+
+（2）Create wallet database
+
+（3）Create account management object `walletDB`
+
+（4）Create asset management object `accounts`
+
+（5）Instantiate `Wallet`
+
+（6）`RescanBlocks()` rescans all local blocks and updates local wallet information.
+
+
+
+### 3.4.9 Network Synchronization 
+
+​	P2P communication module is managed by SyncManager, which manages the synchronization of information(transactions and blocks) between nodes in the business layer. Here is the code that initializes network synchronization:
+
+
+node/node.go
+
+```
+const (
+	maxNewBlockChSize = 1024
+)
+
+newBlockCh := make(chan *bc.Hash, maxNewBlockChSize)
+syncManager, _ := netsync.NewSyncManager(config, chain, txPool, newBlockCh)
+go newPoolTxListener(txPool, syncManager, wallet)
+```
+
+​	The description of main parameters :
+
+* newBlockCh：Channel is used to broadcast information about newly mined blocks quickly to other nodes. The size of chanel is 1024.
+* netsync.NewSyncManager：Instantiate `syncManager` object,  which synchronizes information of blocks and transactions among nodes.
+* newPoolTxListenner：Run a go routine to listen to transactions in TxPool and send transactions to `syncManager` object or local wallet.
+
+
+​	See more details in `Chapter 10 P2P Network`.
+
+
+### 3.4.10 pprof performance analysis tool
+
+​	`pprof` is a tool for visualization and analysis of profiling data in GO library. `ppoof` is used to analyze memory and CPU, and observe call stacks, etc. It can generate both text and graphical reports (through the use of the dot visualization package). (See more details on https://golang.org/pkg/net/http/pprof/). In eiyaro, `ppof` is disabled by default, users can enable it by `--prof_laddr`. Here is the code that initializes pprof over http:
+
+
+
+node/node.go
+
+```
+profileHost := config.ProfListenAddress
+if profileHost != "" {
+	go func() {
+		http.ListenAndServe(profileHost, nil)
+	}()
+}
+```
+
+### 3.4.11 CPU Mining Initialization 
+
+​	Here is the code for initializing CPU mining:
+
+node/node.go
+
+```
+node.cpuMiner = cpuminer.NewCPUMiner(chain, accounts, txPool, newBlockCh)
+node.miningPool = miningpool.NewMiningPool(chain, accounts, txPool, newBlockCh)
+
+if config.Simd.Enable {
+	tensority.UseSIMD = true
+}
+```
+
+​	`sim` is used to optimize Tensority.
+
+
+
+## 3.5 Starting Eiyaro in Daemon mode 
+
+​	Daemon is a long running process that performs system specific tasks and it will keep on running in background until it receives a specific signal and then exits. Most processes in Linux run as daemons.
+
+
+​	The way we implement the daemon process in GO language is to listen for the standard `SIGTERM` signal. Until such a signal is received ,the process will be in a blocked state and will not exit. The process will change to non-blocking state only when a `SIGTERM` signal is received from outside. For more on linux signals refer here http://man7.org/linux/man-pages/man7/signal.7.html.
+
+​	Here is the code that starts the node as a daemon:
+
+
+cmd/eiyarod/commands/run_node.go
+
+```
+func runNode(cmd *cobra.Command, args []string) error {
+	// ...
+	n.RunForever()
+	// ...
+}
+```
+
+node/node.go
+
+```
+func (n *Node) RunForever() {
+	// Sleep forever and then...
+	cmn.TrapSignal(func() {
+		n.Stop()
+	})
+}
+```
+
+vendor/github.com/tendermint/tmlibs/common/os.go
+
+```
+func TrapSignal(cb func()) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		for sig := range c {
+			fmt.Printf("captured %v, exiting...\n", sig)
+			if cb != nil {
+				cb()
+			}
+			os.Exit(1)
+		}
+	}()
+	select {}
+}
+```
+
+​	`signal.Notify()` listens for `Interrupt` and `Term` signals and relays them to channel `c`. The goroutine will wait for a signal message from channel `c`. `select {}` in `TrapSignal()` method keeps the current running process in a blocked state. After receiving Term, a callback function is called if it was defined otherwise `os.Exit(1)` will be run and then the daemon exits.
+
+
+​	There are two ways to send `Term`: one is by running `kill -15 pid` on process Id, the other is using `ctrl+c` on keyboard.
+
+
+
+## 3.6 Stopping Eiyaro Daemon 
+
+​	When a eiyaro daemon receives the `Term` signal to terminate itself, the daemon needs to finish a few final house keeping tasks before exiting to make sure that node is not in an inconsistent state. The final tasks are to safely stop the mining process and safely stop the p2p synchronization.eds to finish the final work to exit, such as disabling mining, P2P synchronization, etc. Here is the code: 
+
+​	Here is the code that does these final tasks:
+
+
+node/node.go
+
+```
+func (n *Node) OnStop() {
+	n.BaseService.OnStop()
+	if n.miningEnable {
+		n.cpuMiner.Stop()
+	}
+	if !n.config.VaultMode {
+		n.syncManager.Stop()
+	}
+}
+```
+
