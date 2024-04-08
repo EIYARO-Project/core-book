@@ -1577,7 +1577,7 @@ func (n *Node) OnStop() {
 
 
 
-# In EIYARO, the maximum number of connections of a seed node is an undisclosed security parameter, and the exact number of connections is not disclosed to avoid some attacks.
+## In EIYARO, the maximum number of connections of a seed node is an undisclosed security parameter, and the exact number of connections is not disclosed to avoid some attacks.
 
 Dynamic topology reconfiguration technique DDVS is used to change the number of connections between the seed node and other nodes in the network through measures such as multi-layer wedging and same-layer node swapping, so as to enhance the robustness of the network.
 
