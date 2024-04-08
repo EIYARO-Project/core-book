@@ -1574,3 +1574,33 @@ func (n *Node) OnStop() {
 
 6.	Security and decentralisation guarantee: the Tensority algorithm also inherits the security and decentralisation characteristics of blockchain technology. This means that it is able to ensure data security while avoiding the problems of single point of failure and centralised control.
 
+
+
+
+# In EIYARO, the maximum number of connections of a seed node is an undisclosed security parameter, and the exact number of connections is not disclosed to avoid some attacks.
+
+Dynamic topology reconfiguration technique DDVS is used to change the number of connections between the seed node and other nodes in the network through measures such as multi-layer wedging and same-layer node swapping, so as to enhance the robustness of the network.
+
+To ensure network security, a penalty mechanism for exceeding the connection threshold is also used.
+
+# The penalty mechanism for node connection count exceeding the threshold includes the following.
+
+## 1.	Connection threshold exceeding detection mechanism
+
+EIYARO monitors the number of connections of each node in real time and triggers the penalty mechanism once it finds that the number of connections of a node exceeds the preset threshold.
+
+## 2.	Temporary connection blocking
+
+For nodes exceeding the connection limit, EIYARO will temporarily prevent them from establishing new connections with other nodes in the network until the number of connections drops to a safe range.
+
+## 3.	Reduced Connection Weight
+
+The connection weight determines the maximum number of connections a node can maintain simultaneously. EIYARO will gradually reduce the connection weight of nodes that frequently exceed the connection limit, thus limiting their maximum connection capacity.
+
+## 4.	Increasing connection costs
+
+EIYARO will penalise nodes with an abnormal number of connections by increasing the cost (e.g., weight fuel) that nodes must pay when starting a new connection.
+
+## 5.	Temporary isolation or permanent exclusion
+
+If a node's behaviour is unusually severe, EIYARO may temporarily isolate it in an area or remove it from the network altogether.
