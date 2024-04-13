@@ -127,19 +127,19 @@ The architecture of Eiyaro is designed as follows:
 
 ​	Smart contract has two features:  traceability and irreversibility.
 
-​	Smart contract implementation is the core and the most important part of Eiyaro. In the following chapters, we will introduce different smart contract models (UTXO, Account ), operation principle, and working mechanism of BVM. We will walk through the code to explain how smart contracts can complete transactions without a central trusted authority to interpret the rules of the contract.
+​	Smart contract implementation is the core and the most important part of Eiyaro. In the following chapters, we will introduce different smart contract models (UTXO, Account ), operation principle, and working mechanism of EVM. We will walk through the code to explain how smart contracts can complete transactions without a central trusted authority to interpret the rules of the contract.
 
 
 
-### 1.3.5 Kernel Layer - BVM(Eiyaro Virtual Machine) 
+### 1.3.5 Kernel Layer - EVM(Eiyaro Virtual Machine) 
 
 
-​	Eiyaro Virtual Machine is designed to execute smart contract programs in a platform-independent environment. BVM is an important part of Eiyaro, which plays a vital role in the process of storing, processing and validating smart contracts.
+​	Eiyaro Virtual Machine is designed to execute smart contract programs in a platform-independent environment. EVM is an important part of Eiyaro, which plays a vital role in the process of storing, processing and validating smart contracts.
 
 
-​	Users can write smart contract programs in a simple high level programming language called Equity. Equity programs can be compiled into standard Eiyaro Virtual machine opcodes. BVM is a platform-independant virtual machine environment that is part of every eiyaro node in the eiyaro blockchain network.
+​	Users can write smart contract programs in a simple high level programming language called Equity. Equity programs can be compiled into standard Eiyaro Virtual machine opcodes. EVM is a platform-independant virtual machine environment that is part of every eiyaro node in the eiyaro blockchain network.
 
-​	In short, BVM is a code running environment build on the Eiyaro blockchain.
+​	In short, EVM is a code running environment build on the Eiyaro blockchain.
 
 
 
