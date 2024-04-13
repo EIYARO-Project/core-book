@@ -18,7 +18,7 @@
 
   
 
-Eiyaro is an open source project written in GO language and hosted on Github (https://github.com/EIYARO/ey).
+Eiyaro is an open source project written in GO language and hosted on Github (https://github.com/EIYARO-Project/core).
 
 Learn about public blockchain technology by analysing and explaining the Eiyaro blockchain source code.
 
