@@ -1615,14 +1615,6 @@ If a node's behaviour is unusually severe, EIYARO may temporarily isolate it in 
 
 ​	ApiServer is an important component of Eiyaro, which is used to listen to, process and response to requests. Its main functions are receiving users' requests, distributing them according to the routing rules and returningneir results to users.
 
-
-​	This chapter covers:
-
-* Create a simple HTTP Server in GO language to make readers understand the process of creating HTTP server.
-* Introduce how ApiServer creates HTTP Server, listen ports and receive requests and the process of requests processing and response in HTTP protocol.
-* A complete HTTP request life cycle.
-
-
  
 
 ## 4.2 Create a Simple HTTP Server
