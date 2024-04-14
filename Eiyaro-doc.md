@@ -5509,3 +5509,1316 @@ curl -X POST submit-work-json -d '{"block_header":{"version":1,"height":62960,"p
 // Result
 true / error
 ```
+
+
+
+# Chapter 04 Interface Layer
+
+## 4.1 Introduction 
+
+​	ApiServer is an important component of Eiyaro, which is used to listen to, process and response to requests. Its main functions are receiving users' requests, distributing them according to the routing rules and returningneir results to users.
+
+
+​	This chapter covers:
+
+* Create a simple HTTP Server in GO language to make readers understand the process of creating HTTP server.
+* Introduce how ApiServer creates HTTP Server, listen ports and receive requests and the process of requests processing and response in HTTP protocol.
+* A complete HTTP request life cycle.
+
+
+ 
+
+## 4.2 Create a Simple HTTP Server
+
+​	In GoLang, the `net/http` library offers HTTP programming related interfaces and encapsulates many functions such as TCP link and message parsing. `http.request` object and `http.ResponseWriter` object are already enough for users interaction. The arguments of requests will be sent and processed by the handler, which also writes the result to the `Response`. Here is the code of a simple HTTP Server:
+
+
+```
+package main
+
+import (
+	"net"
+	"net/http"
+)
+
+func sayHello(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Hello, World!"))
+}
+
+func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", sayHello)
+
+	server := &http.Server{
+		Handler: mux,
+	}
+
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		panic(err)
+	}
+
+	err = server.Serve(listener)
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+​	When this HTTP Service runs, it sends a request to local `8080` port and returns `Hello,Word!` .
+
+
+​	An HTTP Service is created by these three steps:
+
+* Instantiate `http.NewServeMux()` to get the route of `mux`, then add valid routers to `mux.Handle`. Each router has HTTP request method (GET, POST, PUT, DELET), URL and Handler callback function.
+* Listen the `8080` port.
+* Use the listening address as an argument. The HTTP Service serves external requests by running`Serve(listener) `.
+
+ 
+
+## 4.3 Create HTTP Service 
+
+### 4.3.1 Create API Object 
+
+​	`ApiServer` is managed by `API` object. Before running `ApiServer`, `API` object need to be initialized. Here is the code:
+
+
+node/node.go
+
+```
+func (n *Node) initAndstartApiServer() {
+	n.api = api.NewAPI(n.syncManager, n.wallet, n.txfeed, n.cpuMiner, n.miningPool, n.chain, n.config, n.accessTokens)
+
+	listenAddr := env.String("LISTEN", n.config.ApiAddress)
+	env.Parse()
+	n.api.StartServer(*listenAddr)
+}
+```
+
+api/api.go
+
+```
+func NewAPI(sync *netsync.SyncManager, wallet *wallet.Wallet, txfeeds *txfeed.Tracker, cpuMiner *cpuminer.CPUMiner, miningPool *miningpool.MiningPool, chain *protocol.Chain, config *cfg.Config, token *accesstoken.CredentialStore) *API {
+	api := &API{
+		sync:          sync,
+		wallet:        wallet,
+		chain:         chain,
+		accessTokens:  token,
+		txFeedTracker: txfeeds,
+		cpuMiner:      cpuMiner,
+		miningPool:    miningPool,
+	}
+	api.buildHandler()
+	api.initServer(config)
+
+	return api
+}
+```
+
+​	First of all, `API` object is initialized by `api.NewAPI`. There are many arguments in `ApiServer`:
+
+* listenAddr：Local port. If the system environment variable `LISTEN` isn't set, `config.ApiAddress` (default 9888) will be used as `listenAddr`.
+* n.api.StartServer: Listen local port addresses and start HTTP Service.
+
+
+
+
+ 	`NewAPI()` method has three operations:
+
+* Instantiate `API` object.
+* Add routers by `api.buildHandle()` method.
+* Instantiate `http.Server`, set `auth`, etc. by `api.initServer()` method.
+
+ 
+
+### 4.3.2 Create router 
+
+​	HTTP requests are sent to corresponding callback functions through router that has been matched successfully. Only handlers related to account will be introduced here, since Eiyaro has too many handler and they are all similar. Here is the code:
+
+
+```
+func (a *API) buildHandler() {
+	walletEnable := false
+	m := http.NewServeMux()
+	
+	// ...
+	m.Handle("/net-info", jsonHandler(a.getNetInfo))
+	// ...
+
+	handler := latencyHandler(m, walletEnable)
+	handler = maxBytesHandler(handler) // TODO(tessr): consider moving this to non-core specific mux
+	handler = webAssetsHandler(handler)
+	handler = gzip.Handler{Handler: handler}
+	// ...
+}
+```
+
+​	Here it uses `http.NewServeMux()` in Go library to create a router to distribute routes. As we can see, each router is made of a url and a handle callback function. Once the url user requested matches `/net-info`, `ApiServer` will run `a.getNetInfo` function and send arguments.
+
+
+
+​	Other handler work:
+
+* latencyHandler：When requests can't find the web path, it will match `/error` with requests.
+* maxBytesHandler：It limit the size of requests with no more than 10MB for each.
+* webAssetsHandler：It adds routers of dashboard and equity pages, which are hard-coded in Eiyaro. Their paths are `dashboard/dashboard.go` and `equity/equity.go` respectively.
+* gzip.Handler：To enable `gzip`, the level of `gzip.BestSpeed` need to be set (default level-1 and the highest is level-9). Higher level, more time cpu uses. The level can be adjusted according to the the amount of data HTTP Service receives .
+
+
+
+
+### 4.3.3 Instantiate http.Server 
+
+​	`http.Server` is an HTTP Service object. It is the basis of HTTP Service work. Here is the code:
+
+
+```
+func (a *API) initServer(config *cfg.Config) {
+	// ...
+
+	coreHandler.wg.Add(1)
+	mux := http.NewServeMux()
+	mux.Handle("/", &coreHandler)
+
+	handler = mux
+	if config.Auth.Disable == false {
+		handler = AuthHandler(handler, a.accessTokens)
+	}
+	handler = RedirectHandler(handler)
+
+	secureheader.DefaultConfig.PermitClearLoopback = true
+	secureheader.DefaultConfig.HTTPSRedirect = false
+	secureheader.DefaultConfig.Next = handler
+
+	a.server = &http.Server{
+		Handler:      secureheader.DefaultConfig,
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
+	}
+
+	coreHandler.Set(a)
+}
+```
+
+​	There are three steps to instantiate `http.Server` :
+
+1) AuthHandler: It enables `auth`, which means users need to enter `access token` on `dashboard` to login.  `auth` is enabled by default .
+
+2) RedirectHandler：When users enter  "/", it will jump to "/dashboard/" and set the status "302" by default.
+
+3) http.Server: Set the timeout of reading and writing and instantiate `http.Server`。
+
+
+​	By now, all handers have been registered in HTTP Server and `http.Server` object also has been instantiated. We will listen ports and enable HTTP Service next.
+
+
+
+
+### 4.3.4 Enable Api Server 
+
+​	Use `net.listen` in GoLang library to listen local ports addresses. Here starts a goroutine to run HTTP service due to HTTP service is a persistent working. If there was no error message when running `a.server.Serve`, the `9888` port is started successfully. By now, `ApiServer ` has been waiting for users' requests and starts a goroutine to process each request once received. Here is the code:
+
+
+api/api.go
+
+```
+func (a *API) StartServer(address string) {
+	log.WithField("api address:", address).Info("Rpc listen")
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		cmn.Exit(cmn.Fmt("Failed to register tcp port: %v", err))
+	}
+
+	go func() {
+		if err := a.server.Serve(listener); err != nil {
+			log.WithField("error", errors.Wrap(err, "Serve")).Error("Rpc server")
+		}
+	}()
+}
+```
+
+​	The process of `server.Serve` working is as follows:
+
+1) `a.server.Serve` starts a `for` loop to keep receiving accept requests.
+
+2) Instantiate a  `Conn` for each request and also start a `goroutine` for this request to operate `handle`.
+
+3) `c.readRequest(ctx)` reads each request.
+
+4) Chose `handler` according to request and go into the HTTP Server of this handler.
+
+5) Call `w.finishRequest` to delete conn buffer data and stop tcp link. Request is over.
+
+
+
+### 4.3.5 Receive and Respond to Request
+
+​	When starting an HTTP request, we can use `curl` commdline to make an HTTP request to get the network status of the current node. Here is the information of `ApiServer` response: 
+
+
+```
+$ curl -s http://localhost:9888/net-info|jq .
+{
+  "status": "success",
+  "data": {
+    "listening": true,
+    "syncing": false,
+    "mining": false,
+    "peer_count": 0,
+    "current_block": 63304,
+    "highest_block": 63304,
+    "network_id": "mainnet",
+    "version": "1.0.5+2bc2396a"
+  }
+}
+```
+
+​	Anyalse the process of  `ApiServer` :
+
+
+ api/api.go
+
+```
+m.Handle("/net-info", jsonHandler(a.getNetInfo))
+```
+
+​	`ApiServer` parses the head of HTTP, matches the path with `/net-info` and jumps to `a.getNetInfo` function.
+
+
+ api/nodeinfo.go
+
+```
+func (a *API) getNetInfo() Response {
+	return NewSuccessResponse(a.GetNodeInfo())
+}
+```
+
+​	`getNetInfo()` function gets the object information by `P2P`, `cpuMinner`, etc. `getNetInfo()` serializes `NetInfo` structure to JSON format and then returns it to users by instantiating `Response`.
+
+
+ api/api.go
+
+```
+type Response struct {
+	Status      string      `json:"status,omitempty"`
+	Code        string      `json:"code,omitempty"`
+	Msg         string      `json:"msg,omitempty"`
+	ErrorDetail string      `json:"error_detail,omitempty"`
+	Data        interface{} `json:"data,omitempty"`
+}
+
+func NewS\uccessResponse(data interface{}) Response {
+	return Response{Status: SUCCESS, Data: data}
+}
+```
+
+​	`Response` is instantiated by `NewSuccessResponse`, and the HTTP status  code is 200. Here is the description:
+
+* Status: The status string
+* Code: The status code
+* Msg: The status description
+* ErrorDetail: Error message. It is null when requesting successfully
+* Data: Data to response users.
+
+
+
+## 4.4 The Life Cycle of an HTTP Request 
+
+​	`ApiServer` just offers HTTP short link. The link will be shut down after an HTTP request/response and needs to be rebuild when the next HTTP request/response happens. Here is a picture to show the life cycle of an HTTP request : 
+
+
+
+The complete life cycle of HTTP request:
+
+1) User sends an HTTP request to ApiServer.
+
+2) ApiServer receives the HTTP request.
+
+3) Start a goroutine to process the request.
+
+4) Verify the auth of the request.
+
+5) Parse the request.
+
+6) Call the handle callback function by router.
+
+7) Get handle information.
+
+8) Set request status code.
+
+9) Respond to user's request.
+
+
+ 
+
+## 4.5 Eiyaro API Description 
+
+#### 1. Wallet related API 
+
+| API                      | Description                                                  |
+| ------------------------ | ------------------------------------------------------------ |
+| /create-account          | Create account                                               |
+| /list-accounts           | Returns the list of all available accounts.                  |
+| /delete-account          | Delete existed account                                       |
+| /create-account-receiver | Create address and control program                           |
+| /list-addresses          | Returns the list of all available addresses by account.      |
+| /validate-address        | Verify the address is valid, and judge the address is own.   |
+| /list-pubkeys            | Returns the list of all available pubkeys by account.        |
+| /get-mining-address      | Query the current mining address                             |
+| /set-mining-address      | Set the current mining address                               |
+| /get-coinbase-arbitrary  | Get coinbase arbitrary                                       |
+| /set-coinbase-arbitrary  | Set coinbase arbitrary                                       |
+| /create-asset            | Create asset definition                                      |
+| /update-asset-alias      | Update asset alias by assetID                                |
+| /get-asset               | Query detail asset by asset ID                               |
+| /list-assets             | Returns the list of all available assets                     |
+| /create-key              | Create private key                                           |
+| /list-keys               | Returns the list of all available keys.                      |
+| /delete-key              | Delete existed key                                           |
+| /reset-key-password      | Reset key password                                           |
+| /check-key-password      | Check key password                                           |
+| /sign-message            | Sign a message with the key password(decode encrypted private key) of an address |
+| /build-transaction       | Build transaction                                            |
+| /sign-transaction        | Sign transaction                                             |
+| /get-transaction         | Query the account related transaction by transaction ID      |
+| /list-transactions       | Returns the sub list of all the account related transactions |
+| /list-balances           | Returns the list of all available account balances.          |
+| /list-unspent-outputs    | Returns the sub list of all available unspent outputs for all accounts in your wallet. |
+| /backup-wallet           | Backup wallet to image file                                  |
+| /restore-wallet          | Restore wallet by image file                                 |
+| /rescan-wallet           | Trigger to rescan block information into related wallet      |
+| /wallet-info             | Return the information of wallet                             |
+
+#### 2.Token related  API 
+
+| API                  | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| /create-access-token | Create access token                             |
+| /list-access-tokens  | Returns the list of all available access tokens |
+| /delete-access-token | Delete existed access token                     |
+| /check-access-token  | Check access token is valid                     |
+
+#### 3.Transaction related API 
+
+| API                            | Description                                                  |
+| ------------------------------ | ------------------------------------------------------------ |
+| /submit-transaction            | Submit transaction                                           |
+| /estimate-transaction-gas      | Submit transactions used for batch submit transactions       |
+| /get-unconfirmed-transaction   | Estimate consumed neu(1EY = 10^8NEU) for the transaction    |
+| /list-unconfirmed-transactions | Query mempool transaction by transaction ID                  |
+| /decode-raw-transaction        | Decode a serialized transaction hex string into a JSON object describing the transaction |
+
+#### 4. Block related API 
+| API               | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| /get-block        | Returns the detail block by block height or block hash       |
+| /get-block-hash   | Returns the current block hash for blockchain                |
+| /get-block-header | Returns the detail block header by block height or block hash |
+| /get-block-count  | Returns the current block height for blockchain              |
+| /get-difficulty   | Returns the block difficulty by block height or block has    |
+| /get-hash-rate    | Returns the block hash rate by block height or block hash    |
+| /is-mining        | Returns the mining status                                    |
+| /set-mining       | Start up node mining                                         |
+
+#### 5. Mining Pool related API 
+
+| API               | Description                               |
+| ----------------- | ----------------------------------------- |
+| /get-work         | Get the proof of work in Varint format    |
+| /get-work-json    | Get the proof of work by JSON             |
+| /submit-work      | Submit the proof of work in Varint format |
+| /submit-work-json | Submit the proof of work by JSON          |
+| /is-mining        | Returns the mining status                 |
+| /set-mining       | Start up node mining                      |
+
+#### 6. Contract related API
+
+| API             | Description                                                |
+| --------------- | ---------------------------------------------------------- |
+| /verify-message | Verify a signed message with derived pubkey of the address |
+| /decode-program | Decode program                                             |
+| /compile        | Compile equity contract                                    |
+
+#### 7. P2P related API
+
+| API              | Description                                     |
+| ---------------- | ----------------------------------------------- |
+| /net-info        | Returns the information of current network node |
+| /list-peers      | Returns the list of connected peers             |
+| /disconnect-peer | Disconnect to specified peer                    |
+| /connect-peer    | Connect to specified peer                       |
+
+ 
+
+## 4.6  API Tools 
+​	API needs to be tested when developing a public blockchain. There are many test tools, `curl` commandline and `postman` platform are recommended here. We take the `create-key` as an example in the following part.
+
+
+### 4.6.1 Call API via `curl` commandline 
+
+`curl` is a command line tool and library for transferring data with URLs. Use `curl` commandline to send request in the network, then get and collect data and finally show it in the `standard output`.
+
+
+​	Here we use `curl` commandline to call `create-key` to create private key and return it. Here is the code:
+
+
+```
+$ curl -X POST http://localhost:9888/create-key -d '{ "alias" :"user1" , "password":"123456"}'
+
+{"alias":"user1",
+"xpub":"e441f31e16276902d305ab5eb6fb686ec3954a59c00712c5ee7565c93f16589b75ea5e11aa09122962ff7bd04c9dfff5027ca10ac9bea64722934850f6954f56",
+"file":"C:\\Users\\Mac\\AppData\\Roaming\\Eiyaro\\keystore\\UTC--2023-09-21T11-51-52.401546400Z--e35c76e1-0f6c-4431-bb0f-eca37206d885"}
+```
+
+​	Here are the arguments of `curl` commandline:
+
+* -X: Set the method of request, such as GET, POST, DELETE, etc.
+* -d: Use `POST` to send ApiServer data.
+* Others can be learn on the internet.
+
+
+​	Fields of the API result: 
+
+* alias: The alias of the account is `user1`.
+* xpub: Public key.
+* file: The path of keystore.
+
+
+### 4.6.2 Call API via Postman 
+
+​	Postman is a collaboration platform for API development. Its features simplify each step of building an API and streamline collaboration so you can create better APIs—faster.
+
+​	Dowland Postman on https://www.getpostman.com/apps.
+
+
+​	Use Postman to call API by `POST` method. Enter request URL ( `http://127.0.0.1:9888/create-key` ) , enter `{"alias": "user0", "password": "123456"` in `raw` under `Body` in `Text` format, and click `send` button. It returns information that is as same `curl` above: 
+
+
+​	Call `create-access-token` via postman is as same. Moreover, the list of all available keys will be returned by `list-keys`.
+
+
+***Note: Everytime create an account needs to change the alias, or it will return fail message that the alias has been created.***
+
+
+
+
+
+## 4.7 Eiyaro Error Code
+
+eiyaro/api/errors.go
+
+* 0xx—— API errors
+* 1xx—— network errors
+* 2xx—— signature related errors
+* 7xx—— transaction related errors
+* 72x - 73x—— transaction building errors
+* 73x - 75x—— transaction validation errors
+* 76x - 78x—— BVM errors
+* 8xx—— HSM related errors
+
+
+
+# Chapter 05 Kernel Layer - Block and Chain
+
+## 5.1 Introduction
+
+​	Blockchain is a growing list of blocks that are linked in chronological order containing many transactions. This data is a typical link-list structure, all blocks are linked in one blockchain. Each block includes the cryptography hash of the prior block in the blockchain, linking the two. That cryptography hash comes from hashing(SHA256) the previous blockheader and can uniquely identifies a block. 
+
+
+​	As blockchain only allows to link a block to the end of the chain, it is also said that it is like a stack, the first block is in the bottom and then add blocks above it in order, of course, the latest block is the top of stack. The data of blocks can be stored in relational database as well as non-relational database like LevelDB. There are some special words in blockchain, such as genesis block ( the first block of chain, also known as the bottom stack block), which is usually hard-coded and is mined by miners. The height of block: the number of blocks from genesis block to current block.
+
+
+​	The block structure is similar to HTTP request, consisting of `Header` and `Body`, storing some metadata and valid data respectively. `Header` is just the head of block, while `Body` is the main part of block which normally represents a block and stores all transaction information.
+
+
+​	Although each block only has one parent block, one block may have many children blocks. It is known as forks, happens when many blocks take a same block as their parent block and will be found by miners. Forks are very common, but will not exist for a long time under the blockchain consensus that ensures one chain. Because of forks, the latest few blocks in blockchain might be changed by recomputing. In Eiyaro, the latest 6-8 blocks might be changed, but it is almost impossible over 6 blocks. Therefore, a transaction that is confirmed by six consecutive blocks can be seen a success. 
+
+
+​	Generally, because of the chain structure, currencies based on blockchain are believed to be very safe compared with traditional currencies. The `previous block hash` field is inside the block header and thereby affects the current block’s hash. The child’s own identity changes if the parent’s identity changes. This cascade effect ensures that once a block has many generations following it, it cannot be changed without forcing a recalculation of all subsequent blocks, while such a recalculation would require enormous computation which can hardly be met.
+
+
+
+* Structure of the block and the chain
+* The genesis Block
+* Block validation, link to the blockchain and the difficulty target
+* Orphan block management
+
+
+
+
+## 5.2 Block 
+
+​	Data structure is defined into two layers: types layer (protocol/bc/types) and bc layer (protocol/bc). Such as `Tx` is defined in both of them, and transformed by `MapTx` method between two layers. Layers make the data structure more specific. 
+
+* types layer: It is for raw data and transferred between nodes
+* bc layer: It is for visual machine computing, especially for improving transactions validation. 
+
+
+ 
+
+### 5.2.1 Structure of a block 
+
+​	The block is made of a header, containing metadata, and a body, storing all transactions. A block can be seen as a ledger that records transactions and has a title page for brief introduction, namely, block header. Here is the `Block` struct:
+
+ 
+
+protocol/bc/block.go
+
+```
+type Block struct {
+	*BlockHeader
+	ID           Hash
+	Transactions []*Tx
+}
+```
+
+The structure of a block:
+
+###### **chart 5-1**   **The structure of a block:**
+
+| Field        | Bytes    | Description                                   |
+| ------------ | -------- | --------------------------------------------- |
+| BlockHeader  | Variable | Several fields form the block header          |
+| ID           | 32       | Block hash which can identify a certain block |
+| Transactions | Variable | The transactions recorded in this block       |
+
+### 5.2.2 Structure of Block Header
+
+​	The block header consists of three parts. The first is a reference to a previous block hash, which connects this block to the previous block in the blockchain. The second part relates to mining, including the `Timestamp`, `Noce` and `Bits`. Miner need to compute the `Nonce` until it meets the `Bits`. The last part is the merkle tree root, a data structure used to efficiently summarize all the transactions in the block. Here is the `Block Header` structure: 
+
+
+ protocol/bc/bc.pb.go
+
+```
+type BlockHeader struct {
+	Version               uint64
+	Height                uint64
+	PreviousBlockId       *Hash
+	Timestamp             uint64
+	TransactionsRoot      *Hash
+	TransactionStatusHash *Hash
+	Nonce                 uint64
+	Bits                  uint64
+	TransactionStatus     *TransactionStatus
+}
+```
+
+ 
+
+The structure of a block header:
+
+###### **chart5-2** **The structure of a block header:**
+
+| Field                 | Bytes    | Description                                                  |
+| --------------------- | -------- | ------------------------------------------------------------ |
+| Version               | 8        | A version number to track software/protocol upgrades         |
+| Height                | 8        | The height of the block, counted from the genesis block      |
+| PreviousBlockId       | 32       | A reference to the hash of the previous (parent) block in the chain |
+| Timestamp             | 8        | The approximate creation time of this block (seconds from Unix Epoch) |
+| TransactionsRoot      | 32       | A hash of the root of the merkle tree of this block’s transactions |
+| TransactionStatusHash | 32       | A hash of the root of the merkle tree of validation results of this block’s transactions |
+| Nonce                 | 8        | A counter used for the Proof-of-Work algorithm               |
+| Bits                  | 8        | The Proof-of-Work algorithm difficulty target for this block |
+| TransactionStatus     | Variable | The status of transaction after being validated              |
+
+ 
+
+### 5.2.3 Block Identifiers 
+
+​	The block identifier can identify a block uniquely. Block identifiers include block header hash and block Height.
+
+
+The block header hash is made by hashing the block header twice through the SHA256 algorithm. The resulting 32- byte hash is called the *block hash* but is more accurately the *block header hash*. The SHA256 algorithm6 is a digtial signature algorithm defined by digtial signature standard, mainly used to compute the digest of message. No matter many bytes the input is, there will always be a 32- byte hash computed by the SHA256 algorithm. After receiving the message, it can be checked by this 32-byte hash. A tampered message can be catch since its 32-byte hash has been changed. 
+
+​	Features of the SHA256 algorithm:
+
+* No one can get the original message by the 32- byte hash 
+* Messages that are different can not produce a same 32- byte hash 
+
+
+​	Because of the second feature, this 32-byte hash is also called digital fingerprint and identify a block uniquely.
+
+
+​	Note that the block hash is not actually included inside the block’s data structure, and there will not go through all blocks from the highest and check their `PreviousBlockHash` . Instead, the block hash is computed by each node as the block is received from the network. The block hash is stored in a LevelDB as the `key`, to facilitate indexing and faster retrieval of blocks from disk, and the block is its `value`.
+
+
+​	A second way to identify a block is by its position in the blockchain, called the *block height*. But unlike the block hash, the block height is not a unique identifier. That because of the blockchain forks, two or more blocks might have the same block height, competing for the same position in the blockchain. In this scenario, their heights are totally same, while the block hash differs from each other. Obviously, the height can not identify a block uniquely. Blockchain soft fork is just a temporary status, ending up being selected by the consensus algorithm. It is generally believed that in the height smaller than `the highest - 6`, there is not the blockchain soft forks 
+
+
+### 5.2.4 The Genesis Block
+
+​	The first block in the blockchain is called the genesis block.It is the common ancestor of all the blocks in the blockchain, meaning that if you start at any block and follow the chain backward in time, you will eventually arrive at the genesis block. Every node always starts with a blockchain of at least one block because the genesis block is statically encoded within the core of the code, such that it cannot be altered. 
+
+
+​	The genesis block can be got by `eiyarocli` commandline tool, here it is :
+
+
+```
+$ ./eiyarocli get-block 0
+
+{
+  "bits": 2161727821137910500,
+  "difficulty": "15154807",
+  "hash": "a75483474799ea1aa6bb910a1a5025b4372bf20bef20f246a2c2dc5e12e8a053",
+  "height": 0,
+  "nonce": 9253507043297,
+  "previous_block_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "size": 546,
+  "timestamp": 1524549600,
+  "transaction_merkle_root": "58e45ceb675a0b3d7ad3ab9d4288048789de8194e9766b26d8f42fdb624d4390",
+  "transaction_status_hash": "c9c377e5192668bc0a367e4a4764f11e7c725ecced1d7b6a492974fab1b6d5bc",
+  "transactions": [
+  // ...
+  ],
+  "version": 1
+}
+```
+
+​	The description of the genesis block:
+
+* Bits: The target. Only if the miner produces a hash that is less than the target, the block can be packaged successfully by him. Although the target of genesis block is *216172782113791050* , it is not produced by miners but statically encoded within the block, so in fact it can be written whatever.
+* Difficulty：The difficulty, computed from bits. One can estimate the amount of work it takes to succeed from the difficulty.
+* Height: The height of the block. The genesis block is height-0, which means blocks are counted from height-0.
+* Nonce: A counter used for the Proof-of-Work algorithm. It is used to vary the output of a cryptographic function to meet the bits.
+* previous_block_hash：A reference to the hash of the previous (parent) block in the chain. Since the genesis block is the first block and doesn't have a parent block, here is statically encoded with *000000...000000* by default.
+* timestamp：The approximate creation time of this block. The genesis block's is `152454960` (2018-04-24 14:00:00), namely the time of Eiyaro Mainnet implementation. 
+* transaction_merkle_root: A hash of the root of the merkle tree of this block’s transactions. It is used to validate the integrity of transactions in this block.
+* transaction_status_hash: A hash of the root of the merkle tree of validation results of this block’s transactions.
+* transactions: The list of transactions in this block.
+
+
+ 
+
+### 5.2.5 Generate the Genesis Block 
+
+​	When starting a node, it will firstly try to get the blocks information from local Level DB. If the node didn't get blocks, it would regard itself as a new node and initialize the local blockchain according to the statically encoded genesis block. Here is the code to generate the genesis block: 
+
+
+config/genesis.go
+
+```
+func mainNetGenesisBlock() *types.Block {
+   tx := genesisTx()
+   txStatus := bc.NewTransactionStatus()
+   if err := txStatus.SetStatus(0, false); err != nil {
+      log.Panicf(err.Error())
+   }
+   txStatusHash, err := types.TxStatusMerkleRoot(txStatus.VerifyStatus)
+   // ...
+
+   merkleRoot, err := types.TxMerkleRoot([]*bc.Tx{tx.Tx})
+   // ...
+   block := &types.Block{
+      BlockHeader: types.BlockHeader{
+         Version:   1,
+         Height:    0,
+         Nonce:     9253507043297,
+         Timestamp: 1524549600,
+         Bits:      2161727821137910632,
+         BlockCommitment: types.BlockCommitment{
+            TransactionsMerkleRoot: merkleRoot,
+            TransactionStatusHash:  txStatusHash,
+         },
+      },
+      Transactions: []*types.Tx{tx},
+   }
+   return block
+}
+```
+
+​	`mainNetGenesisBlock()` function is used to generate the genesis block. Firstly, a coinbase transaction is produced by `genesisTx()` function and here puts additional information, *Information is power. -- Jan/11/2013. Computing is power. -- Apr/24/2018.*, in this coinbase transaction to memorize the computer genius *Aaron Swart* for his innovative spirit of openning network. There are about 1.4 billion EY in the output of this coinbase transaction bound with a lock script *00148c9d063ff74ee6d9ffa88d83aeb038068366c4c4*.  These 1.4 billion EY is kept by the Eiyaro official, partly used to exchange tokens with the exchanges.
+
+
+ 	After building the coinbase transaction, the node will set the coinbase transaction validation status successful. Here usually has a misunderstanding, why it is successful with a `false` argument? That because Eiyaro uses `StatusFail` to record transaction status (succeed or fail), and setting `false` means the transaction is successful. Later, the node will generate a hash of the root of the merkle tree of the genesis block’s transactions to build the block.
+
+
+ 
+
+### 5.2.6 Blocks Validation 
+
+​	Blocks validation is vital to ensure the blockchian doesn't have forks. If there is no validation, many forks will be produced in the process of blocks sychrolization between nodes. Forks are great threats to the safety of assets in the blockchain.
+
+
+​	Usually, blocks are validated in the following situations:
+
+* Once a mining node successfully mines a block and submits it to the blockchain, this block will be validated firstly.
+* When users submit blocks to the blockchain by API, the node validate blocks.
+* In the process of syncing blocks, every time the node receives blocks from others, it will validate blocks and only link valid blocks to the local blockchain.
+* When mining nodes submit their work to the mining pool, the mining pool will validate the blocks they submit.
+
+
+​	In order to improve the efficiency of  blocks synchronization, Eiyaro offers a safe, simple also fast methond to validate blocks compared with *Etherum*. The blocks validation strategy of *Etherum* is a little complicated, which always makes machine beep  when the blocks validation starts. Here is the code: 
+
+
+protocol/block.go
+
+```
+func (c *Chain) processBlock(block *types.Block) (bool, error) {
+   blockHash := block.Hash()
+   if c.BlockExist(&blockHash) {
+      log.WithFields(log.Fields{"hash": blockHash.String(), "height": block.Height}).Info("block has been processed")
+      return c.orphanManage.BlockExist(&blockHash), nil
+   }
+   if parent := c.index.GetNode(&block.PreviousBlockHash); parent == nil {
+      c.orphanManage.Add(block)
+      return true, nil
+   }
+   if err := c.saveBlock(block); err != nil {
+      return false, err
+   }
+   bestBlock := c.saveSubBlock(block)
+   bestBlockHash := bestBlock.Hash()
+   bestNode := c.index.GetNode(&bestBlockHash)
+   if bestNode.Parent == c.bestNode {
+      log.Debug("append block to the end of mainchain")
+      return false, c.connectBlock(bestBlock)
+   }
+   if bestNode.Height > c.bestNode.Height && bestNode.WorkSum.Cmp(c.bestNode.WorkSum) >= 0 {
+      log.Debug("start to reorganize chain")
+      return false, c.reorganizeChain(bestNode)
+   }
+   return false, nil
+}
+```
+
+​	`processBlock()` function works in the following steps:
+
+1) Compute the block hash and check whether the block exists in the local blockchain or orphan blocks pool by its hash. If the block has been in the local blockchain, then it would be thrown away directly.
+
+2) Find the block's parent block in the local blockchain according to its `PreviousBlockHash`. If the parent block doesn't exist, this block will be put into orphan block pool.
+
+3) If its parent block exists in the local blockchain, link this block to the local blockchain after verifing its transactions and metadata.
+
+4) Check if there are blocks in orphan block pool that can be linked to the blockchain. If there are, link the blocks to the blockchain in some order and then get the highest block `bestNode`.
+
+5) If the `bestNode`'s  parent block is the highest block `c.betNode` before this operation, link the `bestNode` after `c.betNode`. If not, that means the `bestNode` is in the sidechain instead of the main blockchain.
+
+6）If the `bestNode` is in the sidechain and its height is over the main blockchain, which means the work of this sidechain is more than the main blockchain, the node will reorganize the blockchain.
+
+
+​	In step (3), it needs to validate the block header before linking the block to the blockchain. This work covers 5 parts. Here is the code:
+
+
+ protocol/validation/block.go
+
+```
+func ValidateBlockHeader(b *bc.Block, parent *state.BlockNode) error {
+   if b.Version < parent.Version {
+      // ...
+   }
+   if b.Height != parent.Height+1 {
+      // ...
+   }
+   if b.Bits != parent.CalcNextBits() {
+      // ...
+   }
+   if parent.Hash != *b.PreviousBlockId {
+      // ...
+   }
+   if err := checkBlockTime(b, parent); err != nil {
+      // ...
+   }
+   if !difficulty.CheckProofOfWork(&b.ID, parent.CalcNextSeed(), b.BlockHeader.Bits) {
+      // ...
+   }
+   return nil
+}
+```
+
+​	The block header validation includes the following work:
+
+- Check if the version of the block equals to the version of its parent block
+- Check if the height of the block is the height of the parent block plus 1
+- Check if the block target equals the next block target that is calculated by the parent block height. 
+- Check if the block's `Previous Block Hash` is the hash of its parent block
+- Check that the timestamp isn't later more than one hours compared with the current time and not earlier than the intermediate time of the last 11 blocks.
+- Check if the hash of the block equals to the target.
+
+
+### 5.2.7 Calculate the Next Target 
+
+​	Here is the code that calculates the next target according the parent block height: 
+
+
+ protocol/state/blockindex.go
+
+```
+func (node *BlockNode) CalcNextBits() uint64 {
+   if node.Height%consensus.BlocksPerRetarget != 0 || node.Height == 0 {
+      return node.Bits
+   }
+
+   compareNode := node.Parent
+   for compareNode.Height%consensus.BlocksPerRetarget != 0 {
+      compareNode = compareNode.Parent
+   }
+   return difficulty.CalcNextRequiredDifficulty(node.BlockHeader(), compareNode.BlockHeader())
+}
+```
+
+**Algorithm**:  If `the parent block height` *mod* `consensus.BlocksPerRetarget（2016)` doesn't equal 0 as well as the parent block height, the next target will be the same as the parent block's. Or the target will be adjusted. See more detials about `retarget` in the consensus part.
+
+
+### **5.2.8 Orphan Block Management **
+
+​	If a valid block is received and no parent is found in the existing chains, that block is considered an “orphan.” Orphan blocks are saved in the orphan block pool where they will stay until their parent is received. Once the parent is received and linked into the existing chains, the orphan can be pulled out of the orphan pool and linked to the parent, making it part of a chain. 
+
+
+
+​	Orphan blocks usually occur when two blocks that were mined within a short time of each other are received in reverse order (child before parent). Here assumes that there are three blocks and their heights are 100, 101, 102 respectively, then they are received by the node in the order of 102, 101, 100. In this situation, the node will put 102, 101 blocks into orphan block pool where they will stay until their parent is received. Once the 100 block is received and linked to the existing chain after validation, those two orphan blocks will be found by a recursive function, and linked to the parent.
+
+
+​	Here is the orphan block structure:
+
+
+protocol/orphan_manage.go
+
+```
+type orphanBlock struct {
+   *types.Block
+   expiration time.Time
+}
+```
+
+​	The description of orphan block:
+
+* types.Block: The orphan block structure.
+* Expiration: The expiration of the orphan block, which means if this orphan block doesn't be linked to the blockchain before its expiration, it will be thrown away.
+
+
+​	Here is the orphan block pool structure :
+
+
+```
+type OrphanManage struct {
+   orphan      map[bc.Hash]*orphanBlock
+   prevOrphans map[bc.Hash][]*bc.Hash
+   mtx         sync.RWMutex
+}
+```
+
+​	The description of orphan block pool:
+
+* Orphan: Used to store orphan blocks, key is block hash and value is the block.
+* prevOrphans: Orphan block's parent block.
+* Mtx: Exclusive lock, used to ensure the consistency of `map` structure data in multiple concurrency.
+
+
+​	The orphan block manager has main functions as follow:
+
+* BlockExist(): Check if a block is orphan
+* Add(): Add new orphan blocks into the orphan block pool
+* Delete(): Delete an orphan block from the orphan block pool
+* Get(): Get a block from the orphan block pool according to its hash
+* GetPrevOrphans(): Get all blocks that have a same specific parent block hash from the orphan block pool.
+* orphanExpireWorker(): A timer that sets the time to clean the timeout orphan blocks
+* orphanExpire(): Used to clean the timeout orphan block
+
+
+
+
+1) Here is the code that adds an orphan block into the orphan block pool:
+
+
+```
+func (o *OrphanManage) Add(block *types.Block) {
+   blockHash := block.Hash()
+   o.mtx.Lock()
+   defer o.mtx.Unlock()
+   if _, ok := o.orphan[blockHash]; ok {
+      return
+   }
+   o.orphan[blockHash] = &orphanBlock{block, time.Now().Add(orphanBlockTTL)}
+   o.prevOrphans[block.PreviousBlockHash] = append(o.prevOrphans[block.PreviousBlockHash], &blockHash) 
+}
+```
+
+​	Adding a orphan block means not only putting the orphan block into the orphan block pool, also recording the relationship between the orphan block and its parent block, so that the orphan blocks that have the same parent can be found easily.
+
+
+2) Here is the code that deletes an orphan block from the orphan block pool: 
+
+```
+func (o *OrphanManage) delete(hash *bc.Hash) {
+   block, ok := o.orphan[*hash]
+   if !ok {
+      return
+   }
+   delete(o.orphan, *hash)
+   prevOrphans, ok := o.prevOrphans[block.Block.PreviousBlockHash]
+   if !ok || len(prevOrphans) == 1 {
+      delete(o.prevOrphans, block.Block.PreviousBlockHash)
+      return
+   }
+   for i, preOrphan := range prevOrphans {
+      if preOrphan == hash {
+         o.prevOrphans[block.Block.PreviousBlockHash] = append(prevOrphans[:i], prevOrphans[i+1:]...)
+         return
+      }
+   }
+}
+```
+
+​	Accordingly,deleting an orphan block from the orphan block pool needs to delete the orphan block as well as its recorded relationship.
+
+
+​	Here is the code that cleans the orphan blocks regularly:
+
+
+```
+orphanExpireScanInterval = 3 * time.Minute
+
+func (o *OrphanManage) orphanExpireWorker() {
+   ticker := time.NewTicker(orphanExpireWorkInterval) //3分钟
+   for now := range ticker.C {
+      o.orphanExpire(now)
+   }
+   ticker.Stop()
+}
+
+func (o *OrphanManage) orphanExpire(now time.Time) {
+   o.mtx.Lock()
+   defer o.mtx.Unlock()
+   for hash, orphan := range o.orphan {
+      if orphan.expiration.Before(now) { //孤块超时时间60分钟
+         o.delete(&hash)
+      }
+   }
+}
+```
+
+​	Regular orphan block cleaning is for preventing a lot of useless orphan blocks keeping using memory and wasting resources. There might be some blocks that are produced by the malicious nodes and have no existed parent block, so if these blocks are not cleaned up, it will keep occupying a lot local memory. Therefore, orphan block manager starts a goroutine to clean them regularly, running a timer every 3 minutes to clean the orphan blocks that have existed over 60 minutes.
+
+ 
+
+## 5.3 Blockchain 
+
+​	The blockchain data structure is an ordered, back-linked list of blocks of transactions. Here are more details about blockchain data structure in the following part.
+
+> 区块是区块链上的一个元素，区块链按照时间顺序将区块顺序相连，最终形成一条以时间为序列的链表结构。下面详细讲解区块链相关的核心数据结构。
+
+### 5.3.1 The Blockchain Data Structure 
+
+​	The chain-related functions are mainly done by `Chain` structure. `Chain` offers many functions, such as initializing chain, getting the block according to a specific height or hash, getting the current blockchain height, validating the blocks, link and reorganize blocks, etc. Here is the structure of `Chain`: 
+
+
+protocol/protocol.go
+
+```
+type Chain struct {
+	index          *state.BlockIndex
+	orphanManage   *OrphanManage
+	txPool         *TxPool
+	store          Store
+	processBlockCh chan *processBlockMsg
+
+	cond     sync.Cond
+	bestNode *state.BlockNode
+}
+```
+
+​	The description of `Chain` structure:
+
+* Index: The index of block that is stored in the memory. It is designed to be a tree structure to seek blocks quickly.
+* orphanManage: Orphan block manager.
+* txPool: Transaction pool.
+* Store: The interface of blocks persistent storage.
+* processBlockCh: The cache of blocks that wait for validation.
+* cond: It is a structure defined in the `sync` package of GoLang, used as the concurrency control between goroutines.
+* bestNode: Record the highest block of the current blockchain.
+
+
+​	The functions of chain is the most important part in Eiyaro, which realize many operations, such as the transaction validation, the blocks linkage and validation, etc. Here are more details:
+
+* func (c *Chain) BestBlockHeight()：Get the height of the main blockchain
+* func (c *Chain) BestBlockHash()：Get the highest block of the current main blockchain
+* func (c *Chain) BestBlockHeader()：Get  the highest block's header of the current main blockchain
+* func (c *Chain) InMainChain()：Check if the block is in the main blockchain
+* func (c *Chain) CalcNextSeed()：Calculate the seed in Tensority algorithm  
+* func (c *Chain) CalcNextBits()：Calculate the next bits according to the parent block information
+* func (c *Chain) GetTransactionStatus()：Get the status of all transactions in the block
+* func (c *Chain) GetTransactionsUtxo()：Get UTXOs referred by all transactions in the block 
+* func (c *Chain) ValidateTx()：Validate transactions
+* func (c *Chain) ProcessBlock() ：Process blocks. Blocks that are validated successfully will be link to the main blockchain 
+
+
+
+ 
+
+### 5.3.2 Add Blocks into the Blockchain 
+
+​	It is clear that the block will be linked to the blockchain after a series operations of validation mentioned in the block validation part. But there is no more details about how the blocks are store into the blockchain. 
+
+​	In this section, we will go to the details. This work is mainly done by `func (c *Chain) saveBlock(block *types.Block)` function in `protocol/block.go`, and the `saveBlock()` function works in the following steps.
+
+
+**Step 1**: Store the block into the local LevelDB.
+
+​	In the `saveBlock()` function of the `Chain`, the block will be stored into the local LevelDB by the `SaveBlock()` interface after being validated. Here is the code of this interface : 
+
+
+database/leveldb/store.go
+
+```
+func (s *Store) SaveBlock(block *types.Block, ts *bc.TransactionStatus) error {
+   binaryBlock, err := block.MarshalText()
+   // ...
+   binaryBlockHeader, err := block.BlockHeader.MarshalText()
+   // ...
+   binaryTxStatus, err := proto.Marshal(ts)
+   // ...
+   blockHash := block.Hash()
+   batch := s.db.NewBatch()
+   batch.Set(calcBlockKey(&blockHash), binaryBlock)
+   batch.Set(calcBlockHeaderKey(block.Height, &blockHash), binaryBlockHeader)
+   batch.Set(calcTxStatusKey(&blockHash), binaryTxStatus)
+   batch.Write()
+   
+   return nil
+}
+```
+
+​	In the `SaveBlock()` interface, there are three types of block information needed to be stored into the LevelDB. The first is the serialized information of the whole block, using  `B`  as its prefix of key, follwed by the block hash. The second is the serialized information of the block header, using  `BH`  as its prefix of key, follwed by the block height and hash. The third is the serialized information of all transactions is the block, using  `BTS`  as its prefix of key, follwed by the block hash. 
+
+
+**Step 2**: Delete a block from the orphan block pool that has been stored into the LevelDB.
+
+
+```
+c.orphanManage.Delete(&bcBlock.ID)
+```
+
+**Step 3**: Update the new block into the memory of block index.
+
+
+```
+node, err := state.NewBlockNode(&block.BlockHeader, parent)
+if err != nil {
+   return err
+}
+
+c.index.AddNode(node)
+```
+
+​	In the memory, the `BlockIndex` structure is used to conduct and store the block information. In the `BlockIndex` structure, the `index` maps the block, using the hash of the block header as its key. A block can be found quickly by using its hash to match the index. Meanwhile, there is also a `blockNode` array to store the blocks. ???
+
+
+```
+type BlockIndex struct {
+	sync.RWMutex
+
+	index     map[bc.Hash]*BlockNode
+	mainChain []*BlockNode
+}
+```
+
+​	For a block, being store into the blockchain doesn't equal to being in the main blockchain, there are chances to be in the side chain. Therefore, when a block is add by the `AddNode()` function, only the block information of the `index` will be updated with no change in the `mainChain` structure.
+
+
+```
+func (bi *BlockIndex) AddNode(node *BlockNode) {
+  bi.Lock()
+  bi.index[node.Hash] = node
+  bi.Unlock()
+}
+```
+
+### **5.3.3 Linking Blocks in the Blockchain **
+
+​	Blocks need to be connected after being add into the blockchain. This work mainly involves operations on `UTXO`,  including marking all UTXOs in the block  "spent" and removing all transactions out of the transaction pool. Here is the code: 
+
+
+protocol/block.go
+
+```
+func (c *Chain) connectBlock(block *types.Block) (err error) {
+   bcBlock := types.MapBlock(block)
+   if bcBlock.TransactionStatus, err = c.store.GetTransactionStatus(&bcBlock.ID); err != nil {
+      return err
+   }
+   utxoView := state.NewUtxoViewpoint()
+   if err := c.store.GetTransactionsUtxo(utxoView, bcBlock.Transactions); err != nil {
+      return err
+   }
+   if err := utxoView.ApplyBlock(bcBlock, bcBlock.TransactionStatus); err != nil {
+      return err
+   }
+   node := c.index.GetNode(&bcBlock.ID)
+   if err := c.setState(node, utxoView); err != nil {
+      return err
+   }
+   for _, tx := range block.Transactions {
+      c.txPool.RemoveTransaction(&tx.Tx.ID)
+   }
+   return nil
+}
+```
+
+​	First of all, get all UTXOs spent by transactions of this block by the `GetTransactionsUtxo()` function, then put them into the `UtxoViewpoint`, which represents a set of UTXOs. The `ApplyBlock()` function is used to update the status of UTXOs, that is the UTXOs in the input will be marked "spent" if the following two conditions are met:
+
+* The transaction is successful and the asset in the UTXOs is EY
+* If it is an UTXO produced by a coinbase transaction, it can only be used in a transaction after 100 blocks, which means the coinbase UTXO will be unlocked after 100 blocks.
+
+
+​	After the  `ApplyBlock()` function updates the status of the UTXOs , it will store the UTXO that is produced by the coinbase transaction into the UTXOs set of the LevelDB. Apart from that, the status of the UTXOs that has been spent also needs to be updated into the UTXOs set of the LevelDB by the   `setState()` function.
+
+
+### 5.3.4 Reorganize the Blockchain
+
+​	The node adds the received block into the blockchain. The soft fork or the side chain is a forward-compatible change to the consensus rules that allows unupgraded clients to continue to operate in consensus with the new rules. The side chain also have chances to be the main chain, which all depends on the work of chain. In the `processBlock` function, if there is a block whose parent block is not in the main chain, the work of the main and side chains will be measured. The blockchain will be reorganized if the side chain wins. The side chain becomes the main chain. Her is the flow chart of the blockchain reorganization.
+
+
+
+
+​	The calculation algorithm of the amout of work is here:
+
+
+```
+func CalcWork(bits uint64) *big.Int {
+   difficultyNum := CompactToBig(bits)
+   if difficultyNum.Sign() <= 0 {
+      return big.NewInt(0)
+   }
+   denominator := new(big.Int).Add(difficultyNum, bigOne)
+   return new(big.Int).Div(oneLsh256, denominator)
+}
+```
+
+​	The formula of the amount of work:
+
+
+```
+SumPoW = 2^256 / (difficultyNum+1)
+```
+
+​	If the amount of work on the new side chain is over than the older best chain, this side chain will become the new main chain. To achieve that, it needs to find the detach node then cut the link with the old chain and link the following new blocks to the new main chain. All operations above are mainly made by the `reorganizeChain()` function.
+
+
+**Step 1**, figure out the blocks that need to be reorganized and deleted.
+
+​	The  `reorganizeChain()` functions finds the detach node and records `detachNodes` and `attachNodes`.  `detachNodes` are nodes that need to be cut when reorganization happens, while  `attachNodes` needs to be appended to the blockchain. Here is the code:
+
+
+protocol/block.go
+
+```
+func (c *Chain) calcReorganizeNodes(node *state.BlockNode) ([]*state.BlockNode, []*state.BlockNode) {
+	var attachNodes []*state.BlockNode
+	var detachNodes []*state.BlockNode
+
+	attachNode := node
+	for c.index.NodeByHeight(attachNode.Height) != attachNode {
+		attachNodes = append([]*state.BlockNode{attachNode}, attachNodes...)
+		attachNode = attachNode.Parent
+	}
+
+	detachNode := c.bestNode
+	for detachNode != attachNode {
+		detachNodes = append(detachNodes, detachNode)
+		detachNode = detachNode.Parent
+	}
+	return attachNodes, detachNodes
+}
+```
+
+​	The `calcReorganizeNode` function will start with the last block to go through the whole side chain. 
+
+
+**Step 2** , process the ` detachNodes`.
+
+​	Find all blocks that need to be deleted in the `detachNode` array and then process the status of transactions in these blocks by the `DetachTransaction` function. The  `DetachTransaction` function set all UTXOs used in transactions "unspent" so that they can still be spent later. Meanwhile, the `OUTPUT` of these transactions will be set referred to avoid being used in the new transactions. The UTXO set is returned to the original status by operations above. Here is the code:
+
+
+```
+func (view *UtxoViewpoint) DetachTransaction(tx *bc.Tx, statusFail bool) error {
+	for _, prevout := range tx.SpentOutputIDs {
+		spentOutput, err := tx.Output(prevout)
+		if err != nil {
+			return err
+		}
+		if statusFail && *spentOutput.Source.Value.AssetId != *consensus.EYAssetID {
+			continue
+		}
+
+		entry, ok := view.Entries[prevout]
+		if ok && !entry.Spent {
+			return errors.New("try to revert an unspent utxo")
+		}
+		if !ok {
+			view.Entries[prevout] = storage.NewUtxoEntry(false, 0, false)
+			continue
+		}
+		entry.UnspendOutput()
+	}
+
+	for _, id := range tx.TxHeader.ResultIds {
+		output, err := tx.Output(*id)
+		if err != nil {
+			// error due to it's a retirement, utxo doesn't care this output type so skip it
+			continue
+		}
+		if statusFail && *output.Source.Value.AssetId != *consensus.EYAssetID {
+			continue
+		}
+
+		view.Entries[*id] = storage.NewUtxoEntry(false, 0, true)
+	}
+	return nil
+}
+```
+
+**Step 3**, process the `attachNode`
+
+​	This step works just in the opposite of step 2. Here, the node goes through the `attachNodes` array to find the blocks that need to be linked to the main chain. They are linked to the chain by the `ApplyBlock()` function and the `ApplyTransaction()` function  locks all transactions of the block by setting all UTXOs "spent" and instantiates the new UTXO object。
+
+
+ **Step 4**, Update the UTXO set.
+
+​	Add all UTXOs instantiated in the last step into the UTXO set. Update the chain status and change the best block to the highest block of the side chain.
+
+
+ 
+
+### 5.3.5 the Status of the Main Blockchain 
+
+​	At the first time to start a node, initializing the main blockchain or not depends on the `blockStore` key in the database. When initializing the main blockchain, the height of the blockchain is 0 and the hash is the genesis block hash. Here is the code:
+
+
+protocol/store.go
+
+```
+type BlockStoreState struct {
+	Height uint64
+	Hash   *bc.Hash
+}
+```
+
+​	The description of the main blockchain status:
+
+* Height: The biggest height of the current main blockchain.
+* Hash: The hash of the highest block in the current main blockchain.
+
+
+​	The status of the main blockchain needs to be store in persistent storage since it will be used every time the node is restarted. 
+
+
+database/leveldb/store.go
+
+```
+blockStoreKey     = []byte("blockStore")
+```
+
+​	The steps of updating the main blockchain status:
+
+1) Update the main blockchain status at the first time the node is started.
+
+2) Update the main blockchain status when new blocks are linked to the main blockchain.
+
+3) Update the main blockchain status when reorganization happens on the main blockchain.
+
+
+## 5.4 Conclusion 
+
+​	This chapter analyzes in the detail on the structure of block and blockchain as well as  their basic operations. Analysis mainly includes the genesis block, block validation, target, orphan block management, link and reorganize blocks, etc., offering a macro view of the blockchain.
+
