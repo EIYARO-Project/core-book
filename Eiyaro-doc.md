@@ -6819,7 +6819,6 @@ blockStoreKey     = []byte("blockStore")
 3) Update the main blockchain status when reorganization happens on the main blockchain.
 
 
-## 5.4 Conclusion 
 
 ​	This chapter analyzes in the detail on the structure of block and blockchain as well as  their basic operations. Analysis mainly includes the genesis block, block validation, target, orphan block management, link and reorganize blocks, etc., offering a macro view of the blockchain.
 
