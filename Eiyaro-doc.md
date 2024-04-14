@@ -1606,6 +1606,9 @@ EIYARO will penalise nodes with an abnormal number of connections by increasing 
 If a node's behaviour is unusually severe, EIYARO may temporarily isolate it in an area or remove it from the network altogether.
 
 
+
+
+
 # 04 Interface Layer
 
 ## 4.1 Introduction 
