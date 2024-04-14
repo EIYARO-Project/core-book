@@ -1606,12 +1606,515 @@ EIYARO will penalise nodes with an abnormal number of connections by increasing 
 If a node's behaviour is unusually severe, EIYARO may temporarily isolate it in an area or remove it from the network altogether.
 
 
+# 04 Interface Layer
 
-
-#  04 Interface Layer
 ## 4.1 Introduction 
-​   ApiServer is an important component of Eiyaro, which is used to listen to, process and response to requests. Its main functions are receiving users' requests, distributing them according to the routing rules and returningneir results to users.
 
+​	ApiServer is an important component of Eiyaro, which is used to listen to, process and response to requests. Its main functions are receiving users' requests, distributing them according to the routing rules and returningneir results to users.
+
+
+​	This chapter covers:
+
+* Create a simple HTTP Server in GO language to make readers understand the process of creating HTTP server.
+* Introduce how ApiServer creates HTTP Server, listen ports and receive requests and the process of requests processing and response in HTTP protocol.
+* A complete HTTP request life cycle.
+
+
+ 
+
+## 4.2 Create a Simple HTTP Server
+
+​	In GoLang, the `net/http` library offers HTTP programming related interfaces and encapsulates many functions such as TCP link and message parsing. `http.request` object and `http.ResponseWriter` object are already enough for users interaction. The arguments of requests will be sent and processed by the handler, which also writes the result to the `Response`. Here is the code of a simple HTTP Server:
+
+
+```
+package main
+
+import (
+	"net"
+	"net/http"
+)
+
+func sayHello(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Hello, World!"))
+}
+
+func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", sayHello)
+
+	server := &http.Server{
+		Handler: mux,
+	}
+
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		panic(err)
+	}
+
+	err = server.Serve(listener)
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+​	When this HTTP Service runs, it sends a request to local `8080` port and returns `Hello,Word!` .
+
+
+​	An HTTP Service is created by these three steps:
+
+* Instantiate `http.NewServeMux()` to get the route of `mux`, then add valid routers to `mux.Handle`. Each router has HTTP request method (GET, POST, PUT, DELET), URL and Handler callback function.
+* Listen the `8080` port.
+* Use the listening address as an argument. The HTTP Service serves external requests by running`Serve(listener) `.
+
+ 
+
+## 4.3 Create HTTP Service 
+
+### 4.3.1 Create API Object 
+
+​	`ApiServer` is managed by `API` object. Before running `ApiServer`, `API` object need to be initialized. Here is the code:
+
+
+node/node.go
+
+```
+func (n *Node) initAndstartApiServer() {
+	n.api = api.NewAPI(n.syncManager, n.wallet, n.txfeed, n.cpuMiner, n.miningPool, n.chain, n.config, n.accessTokens)
+
+	listenAddr := env.String("LISTEN", n.config.ApiAddress)
+	env.Parse()
+	n.api.StartServer(*listenAddr)
+}
+```
+
+api/api.go
+
+```
+func NewAPI(sync *netsync.SyncManager, wallet *wallet.Wallet, txfeeds *txfeed.Tracker, cpuMiner *cpuminer.CPUMiner, miningPool *miningpool.MiningPool, chain *protocol.Chain, config *cfg.Config, token *accesstoken.CredentialStore) *API {
+	api := &API{
+		sync:          sync,
+		wallet:        wallet,
+		chain:         chain,
+		accessTokens:  token,
+		txFeedTracker: txfeeds,
+		cpuMiner:      cpuMiner,
+		miningPool:    miningPool,
+	}
+	api.buildHandler()
+	api.initServer(config)
+
+	return api
+}
+```
+
+​	First of all, `API` object is initialized by `api.NewAPI`. There are many arguments in `ApiServer`:
+
+* listenAddr：Local port. If the system environment variable `LISTEN` isn't set, `config.ApiAddress` (default 9888) will be used as `listenAddr`.
+* n.api.StartServer: Listen local port addresses and start HTTP Service.
+
+
+
+
+ 	`NewAPI()` method has three operations:
+
+* Instantiate `API` object.
+* Add routers by `api.buildHandle()` method.
+* Instantiate `http.Server`, set `auth`, etc. by `api.initServer()` method.
+
+ 
+
+### 4.3.2 Create router 
+
+​	HTTP requests are sent to corresponding callback functions through router that has been matched successfully. Only handlers related to account will be introduced here, since Eiyaro has too many handler and they are all similar. Here is the code:
+
+
+```
+func (a *API) buildHandler() {
+	walletEnable := false
+	m := http.NewServeMux()
+	
+	// ...
+	m.Handle("/net-info", jsonHandler(a.getNetInfo))
+	// ...
+
+	handler := latencyHandler(m, walletEnable)
+	handler = maxBytesHandler(handler) // TODO(tessr): consider moving this to non-core specific mux
+	handler = webAssetsHandler(handler)
+	handler = gzip.Handler{Handler: handler}
+	// ...
+}
+```
+
+​	Here it uses `http.NewServeMux()` in Go library to create a router to distribute routes. As we can see, each router is made of a url and a handle callback function. Once the url user requested matches `/net-info`, `ApiServer` will run `a.getNetInfo` function and send arguments.
+
+
+
+​	Other handler work:
+
+* latencyHandler：When requests can't find the web path, it will match `/error` with requests.
+* maxBytesHandler：It limit the size of requests with no more than 10MB for each.
+* webAssetsHandler：It adds routers of dashboard and equity pages, which are hard-coded in Eiyaro. Their paths are `dashboard/dashboard.go` and `equity/equity.go` respectively.
+* gzip.Handler：To enable `gzip`, the level of `gzip.BestSpeed` need to be set (default level-1 and the highest is level-9). Higher level, more time cpu uses. The level can be adjusted according to the the amount of data HTTP Service receives .
+
+
+
+
+### 4.3.3 Instantiate http.Server 
+
+​	`http.Server` is an HTTP Service object. It is the basis of HTTP Service work. Here is the code:
+
+
+```
+func (a *API) initServer(config *cfg.Config) {
+	// ...
+
+	coreHandler.wg.Add(1)
+	mux := http.NewServeMux()
+	mux.Handle("/", &coreHandler)
+
+	handler = mux
+	if config.Auth.Disable == false {
+		handler = AuthHandler(handler, a.accessTokens)
+	}
+	handler = RedirectHandler(handler)
+
+	secureheader.DefaultConfig.PermitClearLoopback = true
+	secureheader.DefaultConfig.HTTPSRedirect = false
+	secureheader.DefaultConfig.Next = handler
+
+	a.server = &http.Server{
+		Handler:      secureheader.DefaultConfig,
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
+	}
+
+	coreHandler.Set(a)
+}
+```
+
+​	There are three steps to instantiate `http.Server` :
+
+1) AuthHandler: It enables `auth`, which means users need to enter `access token` on `dashboard` to login.  `auth` is enabled by default .
+
+2) RedirectHandler：When users enter  "/", it will jump to "/dashboard/" and set the status "302" by default.
+
+3) http.Server: Set the timeout of reading and writing and instantiate `http.Server`。
+
+
+​	By now, all handers have been registered in HTTP Server and `http.Server` object also has been instantiated. We will listen ports and enable HTTP Service next.
+
+
+
+
+### 4.3.4 Enable Api Server 
+
+​	Use `net.listen` in GoLang library to listen local ports addresses. Here starts a goroutine to run HTTP service due to HTTP service is a persistent working. If there was no error message when running `a.server.Serve`, the `9888` port is started successfully. By now, `ApiServer ` has been waiting for users' requests and starts a goroutine to process each request once received. Here is the code:
+
+
+api/api.go
+
+```
+func (a *API) StartServer(address string) {
+	log.WithField("api address:", address).Info("Rpc listen")
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		cmn.Exit(cmn.Fmt("Failed to register tcp port: %v", err))
+	}
+
+	go func() {
+		if err := a.server.Serve(listener); err != nil {
+			log.WithField("error", errors.Wrap(err, "Serve")).Error("Rpc server")
+		}
+	}()
+}
+```
+
+​	The process of `server.Serve` working is as follows:
+
+1) `a.server.Serve` starts a `for` loop to keep receiving accept requests.
+
+2) Instantiate a  `Conn` for each request and also start a `goroutine` for this request to operate `handle`.
+
+3) `c.readRequest(ctx)` reads each request.
+
+4) Chose `handler` according to request and go into the HTTP Server of this handler.
+
+5) Call `w.finishRequest` to delete conn buffer data and stop tcp link. Request is over.
+
+
+
+### 4.3.5 Receive and Respond to Request
+
+​	When starting an HTTP request, we can use `curl` commdline to make an HTTP request to get the network status of the current node. Here is the information of `ApiServer` response: 
+
+
+```
+$ curl -s http://localhost:9888/net-info|jq .
+{
+  "status": "success",
+  "data": {
+    "listening": true,
+    "syncing": false,
+    "mining": false,
+    "peer_count": 0,
+    "current_block": 63304,
+    "highest_block": 63304,
+    "network_id": "mainnet",
+    "version": "1.0.5+2bc2396a"
+  }
+}
+```
+
+​	Anyalse the process of  `ApiServer` :
+
+
+ api/api.go
+
+```
+m.Handle("/net-info", jsonHandler(a.getNetInfo))
+```
+
+​	`ApiServer` parses the head of HTTP, matches the path with `/net-info` and jumps to `a.getNetInfo` function.
+
+
+ api/nodeinfo.go
+
+```
+func (a *API) getNetInfo() Response {
+	return NewSuccessResponse(a.GetNodeInfo())
+}
+```
+
+​	`getNetInfo()` function gets the object information by `P2P`, `cpuMinner`, etc. `getNetInfo()` serializes `NetInfo` structure to JSON format and then returns it to users by instantiating `Response`.
+
+
+ api/api.go
+
+```
+type Response struct {
+	Status      string      `json:"status,omitempty"`
+	Code        string      `json:"code,omitempty"`
+	Msg         string      `json:"msg,omitempty"`
+	ErrorDetail string      `json:"error_detail,omitempty"`
+	Data        interface{} `json:"data,omitempty"`
+}
+
+func NewS\uccessResponse(data interface{}) Response {
+	return Response{Status: SUCCESS, Data: data}
+}
+```
+
+​	`Response` is instantiated by `NewSuccessResponse`, and the HTTP status  code is 200. Here is the description:
+
+* Status: The status string
+* Code: The status code
+* Msg: The status description
+* ErrorDetail: Error message. It is null when requesting successfully
+* Data: Data to response users.
+
+
+
+## 4.4 The Life Cycle of an HTTP Request 
+
+​	`ApiServer` just offers HTTP short link. The link will be shut down after an HTTP request/response and needs to be rebuild when the next HTTP request/response happens. Here is a picture to show the life cycle of an HTTP request : 
+
+
+
+The complete life cycle of HTTP request:
+
+1) User sends an HTTP request to ApiServer.
+
+2) ApiServer receives the HTTP request.
+
+3) Start a goroutine to process the request.
+
+4) Verify the auth of the request.
+
+5) Parse the request.
+
+6) Call the handle callback function by router.
+
+7) Get handle information.
+
+8) Set request status code.
+
+9) Respond to user's request.
+
+
+ 
+
+## 4.5 Eiyaro API Description 
+
+#### 1. Wallet related API 
+
+| API                      | Description                                                  |
+| ------------------------ | ------------------------------------------------------------ |
+| /create-account          | Create account                                               |
+| /list-accounts           | Returns the list of all available accounts.                  |
+| /delete-account          | Delete existed account                                       |
+| /create-account-receiver | Create address and control program                           |
+| /list-addresses          | Returns the list of all available addresses by account.      |
+| /validate-address        | Verify the address is valid, and judge the address is own.   |
+| /list-pubkeys            | Returns the list of all available pubkeys by account.        |
+| /get-mining-address      | Query the current mining address                             |
+| /set-mining-address      | Set the current mining address                               |
+| /get-coinbase-arbitrary  | Get coinbase arbitrary                                       |
+| /set-coinbase-arbitrary  | Set coinbase arbitrary                                       |
+| /create-asset            | Create asset definition                                      |
+| /update-asset-alias      | Update asset alias by assetID                                |
+| /get-asset               | Query detail asset by asset ID                               |
+| /list-assets             | Returns the list of all available assets                     |
+| /create-key              | Create private key                                           |
+| /list-keys               | Returns the list of all available keys.                      |
+| /delete-key              | Delete existed key                                           |
+| /reset-key-password      | Reset key password                                           |
+| /check-key-password      | Check key password                                           |
+| /sign-message            | Sign a message with the key password(decode encrypted private key) of an address |
+| /build-transaction       | Build transaction                                            |
+| /sign-transaction        | Sign transaction                                             |
+| /get-transaction         | Query the account related transaction by transaction ID      |
+| /list-transactions       | Returns the sub list of all the account related transactions |
+| /list-balances           | Returns the list of all available account balances.          |
+| /list-unspent-outputs    | Returns the sub list of all available unspent outputs for all accounts in your wallet. |
+| /backup-wallet           | Backup wallet to image file                                  |
+| /restore-wallet          | Restore wallet by image file                                 |
+| /rescan-wallet           | Trigger to rescan block information into related wallet      |
+| /wallet-info             | Return the information of wallet                             |
+
+#### 2.Token related  API 
+
+| API                  | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| /create-access-token | Create access token                             |
+| /list-access-tokens  | Returns the list of all available access tokens |
+| /delete-access-token | Delete existed access token                     |
+| /check-access-token  | Check access token is valid                     |
+
+#### 3.Transaction related API 
+
+| API                            | Description                                                  |
+| ------------------------------ | ------------------------------------------------------------ |
+| /submit-transaction            | Submit transaction                                           |
+| /estimate-transaction-gas      | Submit transactions used for batch submit transactions       |
+| /get-unconfirmed-transaction   | Estimate consumed neu(1EY = 10^8NEU) for the transaction    |
+| /list-unconfirmed-transactions | Query mempool transaction by transaction ID                  |
+| /decode-raw-transaction        | Decode a serialized transaction hex string into a JSON object describing the transaction |
+
+#### 4. Block related API 
+| API               | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| /get-block        | Returns the detail block by block height or block hash       |
+| /get-block-hash   | Returns the current block hash for blockchain                |
+| /get-block-header | Returns the detail block header by block height or block hash |
+| /get-block-count  | Returns the current block height for blockchain              |
+| /get-difficulty   | Returns the block difficulty by block height or block has    |
+| /get-hash-rate    | Returns the block hash rate by block height or block hash    |
+| /is-mining        | Returns the mining status                                    |
+| /set-mining       | Start up node mining                                         |
+
+#### 5. Mining Pool related API 
+
+| API               | Description                               |
+| ----------------- | ----------------------------------------- |
+| /get-work         | Get the proof of work in Varint format    |
+| /get-work-json    | Get the proof of work by JSON             |
+| /submit-work      | Submit the proof of work in Varint format |
+| /submit-work-json | Submit the proof of work by JSON          |
+| /is-mining        | Returns the mining status                 |
+| /set-mining       | Start up node mining                      |
+
+#### 6. Contract related API
+
+| API             | Description                                                |
+| --------------- | ---------------------------------------------------------- |
+| /verify-message | Verify a signed message with derived pubkey of the address |
+| /decode-program | Decode program                                             |
+| /compile        | Compile equity contract                                    |
+
+#### 7. P2P related API
+
+| API              | Description                                     |
+| ---------------- | ----------------------------------------------- |
+| /net-info        | Returns the information of current network node |
+| /list-peers      | Returns the list of connected peers             |
+| /disconnect-peer | Disconnect to specified peer                    |
+| /connect-peer    | Connect to specified peer                       |
+
+ 
+
+## 4.6  API Tools 
+​	API needs to be tested when developing a public blockchain. There are many test tools, `curl` commandline and `postman` platform are recommended here. We take the `create-key` as an example in the following part.
+
+
+### 4.6.1 Call API via `curl` commandline 
+
+`curl` is a command line tool and library for transferring data with URLs. Use `curl` commandline to send request in the network, then get and collect data and finally show it in the `standard output`.
+
+
+​	Here we use `curl` commandline to call `create-key` to create private key and return it. Here is the code:
+
+
+```
+$ curl -X POST http://localhost:9888/create-key -d '{ "alias" :"user1" , "password":"123456"}'
+
+{"alias":"user1",
+"xpub":"e441f31e16276902d305ab5eb6fb686ec3954a59c00712c5ee7565c93f16589b75ea5e11aa09122962ff7bd04c9dfff5027ca10ac9bea64722934850f6954f56",
+"file":"C:\\Users\\Mac\\AppData\\Roaming\\Eiyaro\\keystore\\UTC--2023-09-21T11-51-52.401546400Z--e35c76e1-0f6c-4431-bb0f-eca37206d885"}
+```
+
+​	Here are the arguments of `curl` commandline:
+
+* -X: Set the method of request, such as GET, POST, DELETE, etc.
+* -d: Use `POST` to send ApiServer data.
+* Others can be learn on the internet.
+
+
+​	Fields of the API result: 
+
+* alias: The alias of the account is `user1`.
+* xpub: Public key.
+* file: The path of keystore.
+
+
+### 4.6.2 Call API via Postman 
+
+​	Postman is a collaboration platform for API development. Its features simplify each step of building an API and streamline collaboration so you can create better APIs—faster.
+
+​	Dowland Postman on https://www.getpostman.com/apps.
+
+
+​	Use Postman to call API by `POST` method. Enter request URL ( `http://127.0.0.1:9888/create-key` ) , enter `{"alias": "user0", "password": "123456"` in `raw` under `Body` in `Text` format, and click `send` button. It returns information that is as same `curl` above: 
+
+
+​	Call `create-access-token` via postman is as same. Moreover, the list of all available keys will be returned by `list-keys`.
+
+
+***Note: Everytime create an account needs to change the alias, or it will return fail message that the alias has been created.***
+
+
+
+
+
+## 4.7 Eiyaro Error Code
+
+eiyaro/api/errors.go
+
+* 0xx—— API errors
+* 1xx—— network errors
+* 2xx—— signature related errors
+* 7xx—— transaction related errors
+* 72x - 73x—— transaction building errors
+* 73x - 75x—— transaction validation errors
+* 76x - 78x—— BVM errors
+* 8xx—— HSM related errors
+
+
+
+
+## 4.8
 
 ## API Endpoint
 
@@ -5511,511 +6014,6 @@ true / error
 ```
 
 
-
-# Chapter 04 Interface Layer
-
-## 4.1 Introduction 
-
-​	ApiServer is an important component of Eiyaro, which is used to listen to, process and response to requests. Its main functions are receiving users' requests, distributing them according to the routing rules and returningneir results to users.
-
-
-​	This chapter covers:
-
-* Create a simple HTTP Server in GO language to make readers understand the process of creating HTTP server.
-* Introduce how ApiServer creates HTTP Server, listen ports and receive requests and the process of requests processing and response in HTTP protocol.
-* A complete HTTP request life cycle.
-
-
- 
-
-## 4.2 Create a Simple HTTP Server
-
-​	In GoLang, the `net/http` library offers HTTP programming related interfaces and encapsulates many functions such as TCP link and message parsing. `http.request` object and `http.ResponseWriter` object are already enough for users interaction. The arguments of requests will be sent and processed by the handler, which also writes the result to the `Response`. Here is the code of a simple HTTP Server:
-
-
-```
-package main
-
-import (
-	"net"
-	"net/http"
-)
-
-func sayHello(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Hello, World!"))
-}
-
-func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", sayHello)
-
-	server := &http.Server{
-		Handler: mux,
-	}
-
-	listener, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		panic(err)
-	}
-
-	err = server.Serve(listener)
-	if err != nil {
-		panic(err)
-	}
-}
-```
-
-​	When this HTTP Service runs, it sends a request to local `8080` port and returns `Hello,Word!` .
-
-
-​	An HTTP Service is created by these three steps:
-
-* Instantiate `http.NewServeMux()` to get the route of `mux`, then add valid routers to `mux.Handle`. Each router has HTTP request method (GET, POST, PUT, DELET), URL and Handler callback function.
-* Listen the `8080` port.
-* Use the listening address as an argument. The HTTP Service serves external requests by running`Serve(listener) `.
-
- 
-
-## 4.3 Create HTTP Service 
-
-### 4.3.1 Create API Object 
-
-​	`ApiServer` is managed by `API` object. Before running `ApiServer`, `API` object need to be initialized. Here is the code:
-
-
-node/node.go
-
-```
-func (n *Node) initAndstartApiServer() {
-	n.api = api.NewAPI(n.syncManager, n.wallet, n.txfeed, n.cpuMiner, n.miningPool, n.chain, n.config, n.accessTokens)
-
-	listenAddr := env.String("LISTEN", n.config.ApiAddress)
-	env.Parse()
-	n.api.StartServer(*listenAddr)
-}
-```
-
-api/api.go
-
-```
-func NewAPI(sync *netsync.SyncManager, wallet *wallet.Wallet, txfeeds *txfeed.Tracker, cpuMiner *cpuminer.CPUMiner, miningPool *miningpool.MiningPool, chain *protocol.Chain, config *cfg.Config, token *accesstoken.CredentialStore) *API {
-	api := &API{
-		sync:          sync,
-		wallet:        wallet,
-		chain:         chain,
-		accessTokens:  token,
-		txFeedTracker: txfeeds,
-		cpuMiner:      cpuMiner,
-		miningPool:    miningPool,
-	}
-	api.buildHandler()
-	api.initServer(config)
-
-	return api
-}
-```
-
-​	First of all, `API` object is initialized by `api.NewAPI`. There are many arguments in `ApiServer`:
-
-* listenAddr：Local port. If the system environment variable `LISTEN` isn't set, `config.ApiAddress` (default 9888) will be used as `listenAddr`.
-* n.api.StartServer: Listen local port addresses and start HTTP Service.
-
-
-
-
- 	`NewAPI()` method has three operations:
-
-* Instantiate `API` object.
-* Add routers by `api.buildHandle()` method.
-* Instantiate `http.Server`, set `auth`, etc. by `api.initServer()` method.
-
- 
-
-### 4.3.2 Create router 
-
-​	HTTP requests are sent to corresponding callback functions through router that has been matched successfully. Only handlers related to account will be introduced here, since Eiyaro has too many handler and they are all similar. Here is the code:
-
-
-```
-func (a *API) buildHandler() {
-	walletEnable := false
-	m := http.NewServeMux()
-	
-	// ...
-	m.Handle("/net-info", jsonHandler(a.getNetInfo))
-	// ...
-
-	handler := latencyHandler(m, walletEnable)
-	handler = maxBytesHandler(handler) // TODO(tessr): consider moving this to non-core specific mux
-	handler = webAssetsHandler(handler)
-	handler = gzip.Handler{Handler: handler}
-	// ...
-}
-```
-
-​	Here it uses `http.NewServeMux()` in Go library to create a router to distribute routes. As we can see, each router is made of a url and a handle callback function. Once the url user requested matches `/net-info`, `ApiServer` will run `a.getNetInfo` function and send arguments.
-
-
-
-​	Other handler work:
-
-* latencyHandler：When requests can't find the web path, it will match `/error` with requests.
-* maxBytesHandler：It limit the size of requests with no more than 10MB for each.
-* webAssetsHandler：It adds routers of dashboard and equity pages, which are hard-coded in Eiyaro. Their paths are `dashboard/dashboard.go` and `equity/equity.go` respectively.
-* gzip.Handler：To enable `gzip`, the level of `gzip.BestSpeed` need to be set (default level-1 and the highest is level-9). Higher level, more time cpu uses. The level can be adjusted according to the the amount of data HTTP Service receives .
-
-
-
-
-### 4.3.3 Instantiate http.Server 
-
-​	`http.Server` is an HTTP Service object. It is the basis of HTTP Service work. Here is the code:
-
-
-```
-func (a *API) initServer(config *cfg.Config) {
-	// ...
-
-	coreHandler.wg.Add(1)
-	mux := http.NewServeMux()
-	mux.Handle("/", &coreHandler)
-
-	handler = mux
-	if config.Auth.Disable == false {
-		handler = AuthHandler(handler, a.accessTokens)
-	}
-	handler = RedirectHandler(handler)
-
-	secureheader.DefaultConfig.PermitClearLoopback = true
-	secureheader.DefaultConfig.HTTPSRedirect = false
-	secureheader.DefaultConfig.Next = handler
-
-	a.server = &http.Server{
-		Handler:      secureheader.DefaultConfig,
-		ReadTimeout:  httpReadTimeout,
-		WriteTimeout: httpWriteTimeout,
-		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
-	}
-
-	coreHandler.Set(a)
-}
-```
-
-​	There are three steps to instantiate `http.Server` :
-
-1) AuthHandler: It enables `auth`, which means users need to enter `access token` on `dashboard` to login.  `auth` is enabled by default .
-
-2) RedirectHandler：When users enter  "/", it will jump to "/dashboard/" and set the status "302" by default.
-
-3) http.Server: Set the timeout of reading and writing and instantiate `http.Server`。
-
-
-​	By now, all handers have been registered in HTTP Server and `http.Server` object also has been instantiated. We will listen ports and enable HTTP Service next.
-
-
-
-
-### 4.3.4 Enable Api Server 
-
-​	Use `net.listen` in GoLang library to listen local ports addresses. Here starts a goroutine to run HTTP service due to HTTP service is a persistent working. If there was no error message when running `a.server.Serve`, the `9888` port is started successfully. By now, `ApiServer ` has been waiting for users' requests and starts a goroutine to process each request once received. Here is the code:
-
-
-api/api.go
-
-```
-func (a *API) StartServer(address string) {
-	log.WithField("api address:", address).Info("Rpc listen")
-	listener, err := net.Listen("tcp", address)
-	if err != nil {
-		cmn.Exit(cmn.Fmt("Failed to register tcp port: %v", err))
-	}
-
-	go func() {
-		if err := a.server.Serve(listener); err != nil {
-			log.WithField("error", errors.Wrap(err, "Serve")).Error("Rpc server")
-		}
-	}()
-}
-```
-
-​	The process of `server.Serve` working is as follows:
-
-1) `a.server.Serve` starts a `for` loop to keep receiving accept requests.
-
-2) Instantiate a  `Conn` for each request and also start a `goroutine` for this request to operate `handle`.
-
-3) `c.readRequest(ctx)` reads each request.
-
-4) Chose `handler` according to request and go into the HTTP Server of this handler.
-
-5) Call `w.finishRequest` to delete conn buffer data and stop tcp link. Request is over.
-
-
-
-### 4.3.5 Receive and Respond to Request
-
-​	When starting an HTTP request, we can use `curl` commdline to make an HTTP request to get the network status of the current node. Here is the information of `ApiServer` response: 
-
-
-```
-$ curl -s http://localhost:9888/net-info|jq .
-{
-  "status": "success",
-  "data": {
-    "listening": true,
-    "syncing": false,
-    "mining": false,
-    "peer_count": 0,
-    "current_block": 63304,
-    "highest_block": 63304,
-    "network_id": "mainnet",
-    "version": "1.0.5+2bc2396a"
-  }
-}
-```
-
-​	Anyalse the process of  `ApiServer` :
-
-
- api/api.go
-
-```
-m.Handle("/net-info", jsonHandler(a.getNetInfo))
-```
-
-​	`ApiServer` parses the head of HTTP, matches the path with `/net-info` and jumps to `a.getNetInfo` function.
-
-
- api/nodeinfo.go
-
-```
-func (a *API) getNetInfo() Response {
-	return NewSuccessResponse(a.GetNodeInfo())
-}
-```
-
-​	`getNetInfo()` function gets the object information by `P2P`, `cpuMinner`, etc. `getNetInfo()` serializes `NetInfo` structure to JSON format and then returns it to users by instantiating `Response`.
-
-
- api/api.go
-
-```
-type Response struct {
-	Status      string      `json:"status,omitempty"`
-	Code        string      `json:"code,omitempty"`
-	Msg         string      `json:"msg,omitempty"`
-	ErrorDetail string      `json:"error_detail,omitempty"`
-	Data        interface{} `json:"data,omitempty"`
-}
-
-func NewS\uccessResponse(data interface{}) Response {
-	return Response{Status: SUCCESS, Data: data}
-}
-```
-
-​	`Response` is instantiated by `NewSuccessResponse`, and the HTTP status  code is 200. Here is the description:
-
-* Status: The status string
-* Code: The status code
-* Msg: The status description
-* ErrorDetail: Error message. It is null when requesting successfully
-* Data: Data to response users.
-
-
-
-## 4.4 The Life Cycle of an HTTP Request 
-
-​	`ApiServer` just offers HTTP short link. The link will be shut down after an HTTP request/response and needs to be rebuild when the next HTTP request/response happens. Here is a picture to show the life cycle of an HTTP request : 
-
-
-
-The complete life cycle of HTTP request:
-
-1) User sends an HTTP request to ApiServer.
-
-2) ApiServer receives the HTTP request.
-
-3) Start a goroutine to process the request.
-
-4) Verify the auth of the request.
-
-5) Parse the request.
-
-6) Call the handle callback function by router.
-
-7) Get handle information.
-
-8) Set request status code.
-
-9) Respond to user's request.
-
-
- 
-
-## 4.5 Eiyaro API Description 
-
-#### 1. Wallet related API 
-
-| API                      | Description                                                  |
-| ------------------------ | ------------------------------------------------------------ |
-| /create-account          | Create account                                               |
-| /list-accounts           | Returns the list of all available accounts.                  |
-| /delete-account          | Delete existed account                                       |
-| /create-account-receiver | Create address and control program                           |
-| /list-addresses          | Returns the list of all available addresses by account.      |
-| /validate-address        | Verify the address is valid, and judge the address is own.   |
-| /list-pubkeys            | Returns the list of all available pubkeys by account.        |
-| /get-mining-address      | Query the current mining address                             |
-| /set-mining-address      | Set the current mining address                               |
-| /get-coinbase-arbitrary  | Get coinbase arbitrary                                       |
-| /set-coinbase-arbitrary  | Set coinbase arbitrary                                       |
-| /create-asset            | Create asset definition                                      |
-| /update-asset-alias      | Update asset alias by assetID                                |
-| /get-asset               | Query detail asset by asset ID                               |
-| /list-assets             | Returns the list of all available assets                     |
-| /create-key              | Create private key                                           |
-| /list-keys               | Returns the list of all available keys.                      |
-| /delete-key              | Delete existed key                                           |
-| /reset-key-password      | Reset key password                                           |
-| /check-key-password      | Check key password                                           |
-| /sign-message            | Sign a message with the key password(decode encrypted private key) of an address |
-| /build-transaction       | Build transaction                                            |
-| /sign-transaction        | Sign transaction                                             |
-| /get-transaction         | Query the account related transaction by transaction ID      |
-| /list-transactions       | Returns the sub list of all the account related transactions |
-| /list-balances           | Returns the list of all available account balances.          |
-| /list-unspent-outputs    | Returns the sub list of all available unspent outputs for all accounts in your wallet. |
-| /backup-wallet           | Backup wallet to image file                                  |
-| /restore-wallet          | Restore wallet by image file                                 |
-| /rescan-wallet           | Trigger to rescan block information into related wallet      |
-| /wallet-info             | Return the information of wallet                             |
-
-#### 2.Token related  API 
-
-| API                  | Description                                     |
-| -------------------- | ----------------------------------------------- |
-| /create-access-token | Create access token                             |
-| /list-access-tokens  | Returns the list of all available access tokens |
-| /delete-access-token | Delete existed access token                     |
-| /check-access-token  | Check access token is valid                     |
-
-#### 3.Transaction related API 
-
-| API                            | Description                                                  |
-| ------------------------------ | ------------------------------------------------------------ |
-| /submit-transaction            | Submit transaction                                           |
-| /estimate-transaction-gas      | Submit transactions used for batch submit transactions       |
-| /get-unconfirmed-transaction   | Estimate consumed neu(1EY = 10^8NEU) for the transaction    |
-| /list-unconfirmed-transactions | Query mempool transaction by transaction ID                  |
-| /decode-raw-transaction        | Decode a serialized transaction hex string into a JSON object describing the transaction |
-
-#### 4. Block related API 
-| API               | Description                                                  |
-| ----------------- | ------------------------------------------------------------ |
-| /get-block        | Returns the detail block by block height or block hash       |
-| /get-block-hash   | Returns the current block hash for blockchain                |
-| /get-block-header | Returns the detail block header by block height or block hash |
-| /get-block-count  | Returns the current block height for blockchain              |
-| /get-difficulty   | Returns the block difficulty by block height or block has    |
-| /get-hash-rate    | Returns the block hash rate by block height or block hash    |
-| /is-mining        | Returns the mining status                                    |
-| /set-mining       | Start up node mining                                         |
-
-#### 5. Mining Pool related API 
-
-| API               | Description                               |
-| ----------------- | ----------------------------------------- |
-| /get-work         | Get the proof of work in Varint format    |
-| /get-work-json    | Get the proof of work by JSON             |
-| /submit-work      | Submit the proof of work in Varint format |
-| /submit-work-json | Submit the proof of work by JSON          |
-| /is-mining        | Returns the mining status                 |
-| /set-mining       | Start up node mining                      |
-
-#### 6. Contract related API
-
-| API             | Description                                                |
-| --------------- | ---------------------------------------------------------- |
-| /verify-message | Verify a signed message with derived pubkey of the address |
-| /decode-program | Decode program                                             |
-| /compile        | Compile equity contract                                    |
-
-#### 7. P2P related API
-
-| API              | Description                                     |
-| ---------------- | ----------------------------------------------- |
-| /net-info        | Returns the information of current network node |
-| /list-peers      | Returns the list of connected peers             |
-| /disconnect-peer | Disconnect to specified peer                    |
-| /connect-peer    | Connect to specified peer                       |
-
- 
-
-## 4.6  API Tools 
-​	API needs to be tested when developing a public blockchain. There are many test tools, `curl` commandline and `postman` platform are recommended here. We take the `create-key` as an example in the following part.
-
-
-### 4.6.1 Call API via `curl` commandline 
-
-`curl` is a command line tool and library for transferring data with URLs. Use `curl` commandline to send request in the network, then get and collect data and finally show it in the `standard output`.
-
-
-​	Here we use `curl` commandline to call `create-key` to create private key and return it. Here is the code:
-
-
-```
-$ curl -X POST http://localhost:9888/create-key -d '{ "alias" :"user1" , "password":"123456"}'
-
-{"alias":"user1",
-"xpub":"e441f31e16276902d305ab5eb6fb686ec3954a59c00712c5ee7565c93f16589b75ea5e11aa09122962ff7bd04c9dfff5027ca10ac9bea64722934850f6954f56",
-"file":"C:\\Users\\Mac\\AppData\\Roaming\\Eiyaro\\keystore\\UTC--2023-09-21T11-51-52.401546400Z--e35c76e1-0f6c-4431-bb0f-eca37206d885"}
-```
-
-​	Here are the arguments of `curl` commandline:
-
-* -X: Set the method of request, such as GET, POST, DELETE, etc.
-* -d: Use `POST` to send ApiServer data.
-* Others can be learn on the internet.
-
-
-​	Fields of the API result: 
-
-* alias: The alias of the account is `user1`.
-* xpub: Public key.
-* file: The path of keystore.
-
-
-### 4.6.2 Call API via Postman 
-
-​	Postman is a collaboration platform for API development. Its features simplify each step of building an API and streamline collaboration so you can create better APIs—faster.
-
-​	Dowland Postman on https://www.getpostman.com/apps.
-
-
-​	Use Postman to call API by `POST` method. Enter request URL ( `http://127.0.0.1:9888/create-key` ) , enter `{"alias": "user0", "password": "123456"` in `raw` under `Body` in `Text` format, and click `send` button. It returns information that is as same `curl` above: 
-
-
-​	Call `create-access-token` via postman is as same. Moreover, the list of all available keys will be returned by `list-keys`.
-
-
-***Note: Everytime create an account needs to change the alias, or it will return fail message that the alias has been created.***
-
-
-
-
-
-## 4.7 Eiyaro Error Code
-
-eiyaro/api/errors.go
-
-* 0xx—— API errors
-* 1xx—— network errors
-* 2xx—— signature related errors
-* 7xx—— transaction related errors
-* 72x - 73x—— transaction building errors
-* 73x - 75x—— transaction validation errors
-* 76x - 78x—— BVM errors
-* 8xx—— HSM related errors
 
 
 
