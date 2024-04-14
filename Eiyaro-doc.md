@@ -207,7 +207,6 @@ The architecture of Eiyaro is designed as follows:
 * core.db —— Core database, which stores related data to the main blockchain, including the information of blocks, transactions, assets , etc.
 * discover.db —— The information of nodes in the distributed network. 
 * trusthistory.db—— The information of malicious nodes in the distributed network.
-* txfeeds.db —— Not yet used in this version.
 * txfeeds.db —— Local wallet database, used to store the information of users, assets, transactions, UTXOs, etc.
 
 
