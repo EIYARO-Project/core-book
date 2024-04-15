@@ -6011,7 +6011,7 @@ true / error
 
 
 
-# Chapter 05 Kernel Layer - Block and Chain
+# 05 Kernel Layer - Block and Chain
 
 ## 5.1 Introduction
 
