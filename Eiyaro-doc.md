@@ -24,7 +24,7 @@ Learn about public blockchain technology by analysing and explaining the Eiyaro 
 
 If Bitcoin represents the Blockchain 1.0 era and Ether with Turing-complete smart contracts represents the Blockchain 2.0 era, then Eiyaro with its multi-asset distributed ledger and Turing-complete smart contracts represents the Blockchain 2.5 era.
 
-Eiyaro is based on the UTXO transaction model, which is similar to Bitcoin's, and offers additional features such as multi-asset transactions, Turing-complete smart contracts, and a new POW consensus algorithm called Tensority.
+Eiyaro is based on the UTXO transaction model, which is similar to Bitcoin's, and offers additional features such as multi-asset transactions, Turing-complete smart contracts, and a new POW consensus algorithm called Tensor.
 
 
 
@@ -872,7 +872,7 @@ Flags:
       --p2p.seeds string            Comma delimited host:port seed nodes
       --p2p.skip_upnp               Skip UPNP configuration
       --prof_laddr string           Use http to profile eiyarod programs
-      --simd.enable                 Enable simd, which is used to optimize Tensority
+      --simd.enable                 Enable simd, which is used to optimize Tensor
       --vault_mode                  Run in the offline enviroment
       --wallet.disable              Disable wallet
       --wallet.rescan               Rescan wallet
@@ -1474,7 +1474,7 @@ if config.Simd.Enable {
 }
 ```
 
-​	`sim` is used to optimize Tensority.
+​	`sim` is used to optimize Tensor.
 
 
 
@@ -1559,19 +1559,19 @@ func (n *Node) OnStop() {
 
 # Prisoner of war calculation
 
-## The advantages of Tensority are mainly reflected in the following aspects:
+## The advantages of Tensor are mainly reflected in the following aspects:
 
-1.	Efficient Utilisation of Computing Resources: the Tensority algorithm makes it possible for the miner to provide AI acceleration services while mining by combining blockchain and AI computing. This design greatly improves the utilisation of computing resources, allowing the miner to contribute to the AI field even during idle periods.
+1.	Efficient Utilisation of Computing Resources: the Tensor algorithm makes it possible for the miner to provide AI acceleration services while mining by combining blockchain and AI computing. This design greatly improves the utilisation of computing resources, allowing the miner to contribute to the AI field even during idle periods.
 
-2.	Flexibility: the Tensority algorithm adjusts the difficulty of the computation through the difficulty value, making the algorithm more flexible and adjustable. This flexibility helps the algorithm to adapt to different network environments and computing needs, ensuring the stable operation of the blockchain.
+2.	Flexibility: the Tensor algorithm adjusts the difficulty of the computation through the difficulty value, making the algorithm more flexible and adjustable. This flexibility helps the algorithm to adapt to different network environments and computing needs, ensuring the stable operation of the blockchain.
 
-3.	Innovative: as a new type of consensus algorithm, Tensority integrates matrix and tensor calculations into the consensus process, which is an innovative attempt. It not only brings new technical ideas to the blockchain field, but also provides a possibility for the combination of AI and blockchain.
+3.	Innovative: as a new type of consensus algorithm, Tensor integrates matrix and tensor calculations into the consensus process, which is an innovative attempt. It not only brings new technical ideas to the blockchain field, but also provides a possibility for the combination of AI and blockchain.
 
-4.	Promoting the integration of AI and blockchain: the exploration and practice of Tensority algorithm helps to promote the integration of AI and blockchain technology. This fusion can bring new application scenarios and business models to the two fields, further expanding the boundaries of the technology.
+4.	Promoting the integration of AI and blockchain: the exploration and practice of Tensor algorithm helps to promote the integration of AI and blockchain technology. This fusion can bring new application scenarios and business models to the two fields, further expanding the boundaries of the technology.
 
-5.	Social value and economic benefits: by using the idle computing power of miners to provide acceleration for AI, Tensority not only improves the efficiency of resource utilisation, but may also create additional economic benefits for miners. At the same time, it also helps reduce the cost of AI computing and promote the popularity and application of AI technology.
+5.	Social value and economic benefits: by using the idle computing power of miners to provide acceleration for AI, Tensor not only improves the efficiency of resource utilisation, but may also create additional economic benefits for miners. At the same time, it also helps reduce the cost of AI computing and promote the popularity and application of AI technology.
 
-6.	Security and decentralisation guarantee: the Tensority algorithm also inherits the security and decentralisation characteristics of blockchain technology. This means that it is able to ensure data security while avoiding the problems of single point of failure and centralised control.
+6.	Security and decentralisation guarantee: the Tensor algorithm also inherits the security and decentralisation characteristics of blockchain technology. This means that it is able to ensure data security while avoiding the problems of single point of failure and centralised control.
 
 
 
@@ -6527,7 +6527,7 @@ type Chain struct {
 * func (c *Chain) BestBlockHash()：Get the highest block of the current main blockchain
 * func (c *Chain) BestBlockHeader()：Get  the highest block's header of the current main blockchain
 * func (c *Chain) InMainChain()：Check if the block is in the main blockchain
-* func (c *Chain) CalcNextSeed()：Calculate the seed in Tensority algorithm  
+* func (c *Chain) CalcNextSeed()：Calculate the seed in Tensor algorithm  
 * func (c *Chain) CalcNextBits()：Calculate the next bits according to the parent block information
 * func (c *Chain) GetTransactionStatus()：Get the status of all transactions in the block
 * func (c *Chain) GetTransactionsUtxo()：Get UTXOs referred by all transactions in the block 
