@@ -49,7 +49,7 @@ Eiyaro Blockchain ("Eiyaro") is a multi-asset public blockchain with smart contr
 Eiyaro's codebase is clearly structured and small enough for beginners and advanced programmers to easily get started and keep up. Readers can learn a lot from reading Eiyaro source code, such as Go language programming and application development, the architecture and design of public blockchain, the operation principle of public blockchain and network protocols.
 
 The architecture of Eiyaro is designed as follows: 
-![EIYARO Architecture Diagram](https://github.com/EIYARO/ey-book/tree/main/image/ey_01.png)
+![EIYARO Architecture Diagram](image/ey_01.png)
 
 
 ### 1.3.1 User Interaction Layer 
@@ -219,7 +219,7 @@ The architecture of Eiyaro is designed as follows:
  ***1. Nodes discovery***
 
 ​	Nodes discovery of P2P network mainly aims to solve how the new node join the network of Eiyaro, which requires the new node can be known by other nodes as soon as possible, and gets information from other nodes as well. The Eiyaro nodes discovery uses Kademli, which is a overlay network with a specific structure of the P2P network. Each node is identified by a number or node ID, which is stored in each node. Kademlia stores nodes in the k-buckets, and every node just connects with the n closest nodes to form the topological structure of network as follows : 
-![EIYARO-Node](https://github.com/EIYARO/ey-book/tree/main/image/node_01.png)
+![EIYARO-Node](image/node_01.png)
 
 
 
@@ -258,24 +258,24 @@ The architecture of Eiyaro is designed as follows:
 
 1）Download ：
 
-```
-$ git clone https://github.com/Eiyaro/ey.git $GOPATH/src/eiyaro/ey
+```console
+$ git clone https://github.com/EIYARO-Project/core.git $GOPATH/src/eiyaro/core
 ```
 
 
 2）Compile：
 
-```
-$ cd $GOPATH/src/eiyaro/ey
+```console
+$ cd $GOPATH/src/eiyaro/core
 $ go mod tidy
-$ make eiyarocd    
-$ make eiyaroccli  
+$ make eiyarod    
+$ make eiyarocli  
 ```
 
 3）Initialize ：
 
-```
-$ cd /src/eiyaro/ey/cmd/eiyarod
+```console
+$ cd /src/eiyaro/core/cmd/eiyarod
 $ go build
 $ ./eiyarod init --chain_id mainnet
 ```
@@ -289,10 +289,10 @@ $ ./eiyarod init --chain_id mainnet
 
 4）Start the Eiyarod：
 
-```
+```console
 $ nohup ./eiyarod node &
 
-$ cd /src/eiyaro/ey/cmd/eiyarocli
+$ cd /src/eiyaro/core/cmd/eiyarocli
 $ go build
 $ ./eiyarocli net-info
 {
@@ -317,7 +317,7 @@ $ ./eiyarocli net-info
 
 ​	Here is the directory listing of the source code:
 
-```
+```console
 $ tree -L 1
 .
 ├── accesstoken       
@@ -357,7 +357,7 @@ $ tree -L 1
 
 ​	Use the command line to start mining :
 
-```
+```console
 $ ./eiyarocli set-mining true
 ```
 
@@ -387,7 +387,7 @@ $ ./eiyarocli set-mining true
 ​	2. Using a sub-command (eiyarocli [command]). All sub-commands can be seen by `-h` or `-help`. The help section is pretty detailed, useful and easy to understand.
 
 
-```
+```console
 $ ./eiyarocli -h
 Eiyarocli is a commond line client for eiyaro core (a.k.a. eiyarod)
 
@@ -460,7 +460,7 @@ Available Commands:
 ​	Run `eiyarocli net-info -h` to get help information.
 
 
-```
+```console
 $ ./eiyarocli net-info -h
 Print the summary of network
 Usage:
@@ -472,7 +472,7 @@ Flags:
 ​	You can see that `net info` is very simple and has only one flag `-h`.
 
 
-```
+```console
 $ ./eiyarocli net-info
 {
   "current_block": 36714,
@@ -506,7 +506,7 @@ $ ./eiyarocli net-info
 ​	Here is the structure of eiyarocli code.
 
 
-```
+```console
 $ tree cmd/eiyarocli/
 cmd/eiyarocli/
 ├── eiyarocli
@@ -544,7 +544,7 @@ cmd/eiyarocli/
 ​	Using Cobra is easy. First, use `go get` to install the latest version of the library. This command will install the `cobra` generator executable along with the library and it's dependencies. After installing, you can find cobra in `GOPATH/bin`.
 
 
-```
+```console
 $ go get -v github.com/spf13/cobra/cobra
 ```
 
@@ -554,14 +554,14 @@ $ go get -v github.com/spf13/cobra/cobra
 
 
 
-```
+```console
 $ cobra init demo 
 ```
 
 ​	There will be a `demo` under `GOPATH/src` as follows:
 
 
-```
+```console
 $ tree demo/
 demo/
 ├── LICENSE
@@ -575,7 +575,7 @@ demo/
 ​	​To add a bit more functionality, Open `main.go`:
 
 
-```
+```go
 package main
 
 import "demo/cmd"
@@ -590,7 +590,7 @@ func main() {
 ​	Create a new file `imp.go` in `demo` and copy these contents:
 
 
-```
+```go
 package imp
 
 import(
@@ -605,7 +605,7 @@ func Show(name string, age int) {
 ​	In `imp.go`, `show()` has two arguments: `name` and `age`, which are printed by `fmt`. The `demo` directory now looks as follows:
 
 
-```
+```console
 $ tree demo/
 demo/
 ├── LICENSE
@@ -619,7 +619,7 @@ demo/
 ​	All Cobra commands need to be defined by GO struct `cobra.Command`. To implement `demo`, we shall make some changes to RootCmd in `demo/cmd/root.go`.
 
 
-```
+```go
 var RootCmd = &cobra.Command{
     Use:   "demo",
     Short: "A test demo",
@@ -641,7 +641,7 @@ var RootCmd = &cobra.Command{
 ​	Make the following changes in `demo/cmd/root.go`:
 
 
-```
+```go
 var (
     name string
     age  int
@@ -656,7 +656,7 @@ func init() {
 ​	We can run `demo` from command line now:
 
 
-```
+```console
 $ go run main.go
 Usage:
   demo [flags]
@@ -672,7 +672,7 @@ Flags:
 ​	If we want to create a CLI application with sub commands, just need to run `cobra add` to add sub commands to it. Here we add a sub command `server` as follows:
 
 
-```
+```console
 $ cd demo
 $ cobra add server
 ```
@@ -680,7 +680,7 @@ $ cobra add server
 ​	This will add a file `server.go` in `demo/cmd/` :
 
 
-```
+```console
 $ tree demo/
 demo/
 ├── LICENSE
@@ -695,7 +695,7 @@ demo/
 ​	We now configure the `server` just like we did in `root.go`. Here it is : 
 
 
-```
+```console
 $ go run main.go
 Usage:
   demo [flags]
@@ -723,8 +723,8 @@ Use "demo [command] --help" for more information about a command.
 ​	In the last section, we looked at how to use Cobra to create a CLI application. With a good understanding of how Cobra works, it is easy to read the rest of eiyarocli code. Just like in the `demo` command application, eiyarocli also runs `cmd.Execute()` in the main function at the start of the eiyarocli application. `cmd.Execute()` calls the `Execute()` method from the package named `commands. cmd` is just another name given to package `commands` when it is imported into `main.go`.
 
 
-```
-cmd/eiyarocli/main.go
+```go
+//cmd/eiyarocli/main.go
 func main() {
     runtime.GOMAXPROCS(runtime.NumCPU())
     cmd.Execute()
@@ -734,8 +734,8 @@ func main() {
 ​	When the program runs `cmd.Execute()`, it first runs `init()` function in `commands` to parse command line arguments. After that, `Execute()` will be run. In `Execute()`, `AddCommands()` s run first and this adds sub commands to Eiyarocli Cmd, while `AddTemplateFunc()` is for adding templates to sub commands. After these (`init()`,`AddCommands()` ,`AddTemplateFunc()`) are run, it will start to execute the commands. When running Eiyarocli `cmd.Execute()`, Cobra will jump into the sub commands given by the user at command input and run its `Run`.
 
 
-```
-cmd/eiyarocli/commands/eiyarocli.go
+```go
+//cmd/eiyarocli/commands/eiyarocli.go
 func Execute() {
 
     AddCommands()
@@ -750,8 +750,8 @@ func Execute() {
 ​	Here we take `create-access-token` as the example to analyze what its `Run` does. It takes `arg[0]` as tokenID, then calls `ClientCall` in `util` to get the path of `/create-access-token` and sends tokenID to create a new token.
 
 
-```
-eiyaro/cmd/eiyarocli/commands/accesstoken.go
+```go
+//eiyaro/cmd/eiyarocli/commands/accesstoken.go
 var createAccessTokenCmd = &cobra.Command{
     Use:   "create-access-token <tokenID>",
     Short: "Create a new access token",
@@ -772,8 +772,8 @@ var createAccessTokenCmd = &cobra.Command{
 ​	`ClientCall` encapsulates a RPC client, which can compose requests based on path and arguments given by the caller and parse the response from RPC server.
 
 
-```
-eiyaro/util/util.go
+```go
+//eiyaro/util/util.go
 func ClientCall(path string, req ...interface{}) (interface{}, int) {
 
     var response = &api.Response{}
@@ -808,7 +808,7 @@ func ClientCall(path string, req ...interface{}) (interface{}, int) {
 ​	​Eiyaro Dashboard is a seperate project available here.(https://github.com/EIYARO/ey-dashboard). Compiled and compressed version of Dashboard is hard-coded in eiyarod and you can find it's code in `dashboard/dashboard.go`. The `hanlder` information is in `api/api.go`.
 
 
-```
+```go
 mux := http.NewServeMux()
 mux.Handle("/dashboard/", http.StripPrefix("/dashboard/", static.Handler{
 	Assets:  dashboard.Files,
@@ -838,7 +838,7 @@ mux.Handle("/dashboard/", http.StripPrefix("/dashboard/", static.Handler{
 ​	Commandline programs accept input arguments. Programming lanaguages offer functions and libraries to parse these input arguments. In GoLang, 'flag' package handles parsing the input arguments. Sub-commands and other parameters supported by eiyarod are as follows: 
 
 
-```
+```console
 $ ./eiyarod -h
 Multiple asset management.
 
@@ -890,7 +890,7 @@ Global Flags:
 ​	eiyarod and eiyarocli both use Cobra library to handle command line input so we will skip that part here and look into other details of eiyaro daemon.
 
 
-```
+```console
 $ tree cmd/eiyarod/
 cmd/eiyarod/
 ├── eiyarod
@@ -911,8 +911,8 @@ cmd/eiyarod/
 
 ### 3.4.1 Node
 
-```
-node/node.go
+```go
+//node/node.go
 type Node struct {
 	cmn.BaseService
  
@@ -956,18 +956,16 @@ type Node struct {
 ​	Config variable is initialized with default configuration before running `node.NewNode(config)`. Here we will describe the default configuration in detail:
 
 
- cmd/eiyarod/commands/root.go
 
-```
+```go
+//cmd/eiyarod/commands/root.go
 config = cfg.DefaultConfig()
 ```
 
 ​	Eiyaro daemon defines a global variable named `config`, which represents eiyaro daemon configuration and is set by default when daemon starts.
 
-
-config/config.go
-
-```
+```go
+//config/config.go
 func DefaultConfig() *Config {
 	return &Config{
 		BaseConfig: DefaultBaseConfig(),
@@ -989,10 +987,8 @@ func DefaultConfig() *Config {
 
 ​	BaseConfig includes data directory, log level, listening address and other relevant configuration.
 
-
-config/config.go
-
-```
+```go
+//config/config.go
 type BaseConfig struct {
 	RootDir string `mapstructure:"home"` 		// The root directory for all data.
 	ChainID string `mapstructure:"chain_id"` 	// The ID of the network to json. There are three options: mainnet,testnet and solonet
@@ -1014,12 +1010,10 @@ type BaseConfig struct {
 	LogFile string `mapstructure:"log_file"` // log file name
 ```
 
-​	`config/toml.go` file provides some default arguments for configuration. e.g, APIAddress is read form `api_addr` value in config file.
+`config/toml.go` file provides some default arguments for configuration. e.g, APIAddress is read form `api_addr` value in config file.
 
-
-config/toml.go
-
-```
+```toml
+#config/toml.go
 var defaultConfigTmpl = `# This is a TOML config file.
 fast_sync = true
 db_backend = "leveldb"
@@ -1029,18 +1023,14 @@ var mainNetConfigTmpl = `chain_id = "mainnet"
 [p2p]
 laddr = "tcp://0.0.0.0:46657"
 seeds = "xxx.xxx.xxx.xxx:46657"
-`
 ```
 
-***（2）P2PConfig ***
+***2）P2PConfig***
 
-​	P2PConfig is used in P2P protocol. It includes local listening ports, dial timeout and address book, etc.
+P2PConfig is used in P2P protocol. It includes local listening ports, dial timeout and address book, etc.
 
-
-
-config/config.go
-
-```
+```go
+//config/config.go
 type P2PConfig struct {
 	RootDir          string `mapstructure:"home"` 	
 	ListenAddress    string `mapstructure:"laddr"` 	// tcp://0.0.0.0:46656
@@ -1060,15 +1050,12 @@ type P2PConfig struct {
 
 
 
-***（3）Other Configuration***
+***3）Other Configuration***
 
 ​	WalletConfig is used to configure the local wallet. It includes a flag to enable or disable the wallet functionality and another flag to rescan the entire wallet.
 
-
-
-config/config.go
-
-```
+```go
+//config/config.go
 type WalletConfig struct {
 	Disable bool `mapstructure:"disable"`	// Enable the local wallet(default false) 
 	Rescan  bool `mapstructure:"rescan"`	// Rescan the wallet
@@ -1089,11 +1076,8 @@ type SimdConfig struct {
 
 ​	After declaring `config = DefaultConfig()`, `init()` method will assign the config attributes. Here is the code:
 
-
-
-cmd/eiyarod/commands/run_node.go
-
-```
+```go
+//cmd/eiyarod/commands/run_node.go
 func init() {
 	runNodeCmd.Flags().String("prof_laddr", config.ProfListenAddress, "Use http to profile eiyarod programs")
 	runNodeCmd.Flags().Bool("mining", config.Mining, "Enable mining")
@@ -1131,7 +1115,7 @@ func init() {
 
 
 
-```
+```go
 runNodeCmd.Flags().Bool("mining", config.Mining, "Enable mining")
 ```
 
@@ -1154,11 +1138,8 @@ runNodeCmd.Flags().Bool("mining", config.Mining, "Enable mining")
 
 ​	In Eiyaro, a data directory(specified by `--root`) can only be read and written by one eiyaro daemon at a time. That is because the LevelDB Key-Value store runs in a single process. If multiple processes write to the same file, the consistency of data cannot be ensured. To ensure only one process reads or writes the data file at a time, eiyaro uses a file lock.
 
-
-
-node/node.go
-
-```
+```go
+//node/node.go
 if err := lockDataDirectory(config); err != nil {
 	cmn.Exit("Error: " + err.Error())
 }
@@ -1184,10 +1165,8 @@ func lockDataDirectory(config *cfg.Config) error {
 
 ​	The `flock` package uses an exclusive lock `LOCK_EX`, which means only one process may hold this lock for a given file at a given time. The code for flock is here:
 
-
-vendor/github.com/prometheus/prometheus/util/flock/flock_unix.go
-
-```
+```go
+//vendor/github.com/prometheus/prometheus/util/flock/flock_unix.go
 func (l *unixLock) set(lock bool) error {
 	how := syscall.LOCK_UN
 	if lock {
@@ -1203,10 +1182,8 @@ func (l *unixLock) set(lock bool) error {
 
 ​	We have mentioned before that Eiyaro has three types of network, mainnet, testnet, solonet.
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 initActiveNetParams(config)
 
 func initActiveNetParams(config *cfg.Config) {
@@ -1221,9 +1198,10 @@ func initActiveNetParams(config *cfg.Config) {
 ​	Here `initActiveNetParams()` initializes the network according to the `chain_id` set in config. `consensus.ActiveNetParams()` object refers to the type of current network mode used in Eiyaro. The `consensus.ActiveNetParams` object is used all over the eiyaro code to identify what network this node is connected to.
 
 
-consensus/general.go
 
-```
+
+```go
+//consensus/general.go
 var ActiveNetParams = MainNetParams
 
 var NetParams = map[string]Params{
@@ -1260,17 +1238,14 @@ var MainNetParams = Params{
 
 ​	All data (blocks, transactions, etc.) on the blockchain needs to be stored in local K/V database once a pubilc blockchain is created. Eiyaro uses LevelDB as its database .
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 coreDB := dbm.NewDB("core", config.DBBackend, config.DBDir())
 store := leveldb.NewStore(coreDB)
 ```
 
-database/leveldb/store.go
-
-```
+```go
+//database/leveldb/store.go
 type Store struct {
 	db    dbm.DB
 	cache blockCache
@@ -1287,10 +1262,8 @@ type Store struct {
 
 ​	When transactions are broadcast to the network, miners receive them and add them to local TxPool (transaction pool). Eiyaro TxPool is a limited buffer that can store upto 10,000 transactions by default. If the number of transactions is over 10,000, an error message "transaction pool reach the max number" will be returned.
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 txPool := protocol.NewTxPool()
 
 protocol/txpool.go
@@ -1312,10 +1285,8 @@ func NewTxPool() *TxPool {
 
 ​	When the node starts for the first time, it will check the status of local persistent storage. If the status is not yet initialized, the node initializes the storage by adding the genesis block to the blockchain at height-0.
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 chain, err := protocol.NewChain(store, txPool)
 if err != nil {
 	cmn.Exit(cmn.Fmt("Failed to create chain structure: %v", err))
@@ -1324,10 +1295,8 @@ if err != nil {
 
 ​	Here, `protocol.NewChain()`method returns a `Chain` object and needs two parameters store and txPool. The Chain object manages the entire Eiyaro blockchain.
 
-
-protocol/protocol.go
-
-```
+```go
+//protocol/protocol.go
 func NewChain(store Store, txPool *TxPool) (*Chain, error) {
 	c := &Chain{
 		orphanManage:   NewOrphanManage(),
@@ -1374,10 +1343,8 @@ func NewChain(store Store, txPool *TxPool) (*Chain, error) {
 
 ​	The local wallet feature is enabled by default. Here is the code:
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 hsm, err := pseudohsm.New(config.KeysDir())
 if err != nil {
 	cmn.Exit(cmn.Fmt("initialize HSM failed: %v", err))
@@ -1419,10 +1386,8 @@ if !config.Wallet.Disable {
 
 ​	P2P communication module is managed by SyncManager, which manages the synchronization of information(transactions and blocks) between nodes in the business layer. Here is the code that initializes network synchronization:
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 const (
 	maxNewBlockChSize = 1024
 )
@@ -1446,11 +1411,8 @@ go newPoolTxListener(txPool, syncManager, wallet)
 
 ​	`pprof` is a tool for visualization and analysis of profiling data in GO library. `ppoof` is used to analyze memory and CPU, and observe call stacks, etc. It can generate both text and graphical reports (through the use of the dot visualization package). (See more details on https://golang.org/pkg/net/http/pprof/). In eiyaro, `ppof` is disabled by default, users can enable it by `--prof_laddr`. Here is the code that initializes pprof over http:
 
-
-
-node/node.go
-
-```
+```go
+//node/node.go
 profileHost := config.ProfListenAddress
 if profileHost != "" {
 	go func() {
@@ -1463,9 +1425,8 @@ if profileHost != "" {
 
 ​	Here is the code for initializing CPU mining:
 
-node/node.go
-
-```
+```go
+//node/node.go
 node.cpuMiner = cpuminer.NewCPUMiner(chain, accounts, txPool, newBlockCh)
 node.miningPool = miningpool.NewMiningPool(chain, accounts, txPool, newBlockCh)
 
@@ -1487,10 +1448,8 @@ if config.Simd.Enable {
 
 ​	Here is the code that starts the node as a daemon:
 
-
-cmd/eiyarod/commands/run_node.go
-
-```
+```go
+//cmd/eiyarod/commands/run_node.go
 func runNode(cmd *cobra.Command, args []string) error {
 	// ...
 	n.RunForever()
@@ -1498,9 +1457,8 @@ func runNode(cmd *cobra.Command, args []string) error {
 }
 ```
 
-node/node.go
-
-```
+```go
+//node/node.go
 func (n *Node) RunForever() {
 	// Sleep forever and then...
 	cmn.TrapSignal(func() {
@@ -1509,9 +1467,8 @@ func (n *Node) RunForever() {
 }
 ```
 
-vendor/github.com/tendermint/tmlibs/common/os.go
-
-```
+```go
+//vendor/github.com/tendermint/tmlibs/common/os.go
 func TrapSignal(cb func()) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -1541,10 +1498,8 @@ func TrapSignal(cb func()) {
 
 ​	Here is the code that does these final tasks:
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 func (n *Node) OnStop() {
 	n.BaseService.OnStop()
 	if n.miningEnable {
@@ -1621,7 +1576,7 @@ If a node's behaviour is unusually severe, EIYARO may temporarily isolate it in 
 ​	In GoLang, the `net/http` library offers HTTP programming related interfaces and encapsulates many functions such as TCP link and message parsing. `http.request` object and `http.ResponseWriter` object are already enough for users interaction. The arguments of requests will be sent and processed by the handler, which also writes the result to the `Response`. Here is the code of a simple HTTP Server:
 
 
-```
+```go
 package main
 
 import (
@@ -1670,10 +1625,8 @@ func main() {
 
 ​	`ApiServer` is managed by `API` object. Before running `ApiServer`, `API` object need to be initialized. Here is the code:
 
-
-node/node.go
-
-```
+```go
+//node/node.go
 func (n *Node) initAndstartApiServer() {
 	n.api = api.NewAPI(n.syncManager, n.wallet, n.txfeed, n.cpuMiner, n.miningPool, n.chain, n.config, n.accessTokens)
 
@@ -1683,9 +1636,8 @@ func (n *Node) initAndstartApiServer() {
 }
 ```
 
-api/api.go
-
-```
+```go
+//api/api.go
 func NewAPI(sync *netsync.SyncManager, wallet *wallet.Wallet, txfeeds *txfeed.Tracker, cpuMiner *cpuminer.CPUMiner, miningPool *miningpool.MiningPool, chain *protocol.Chain, config *cfg.Config, token *accesstoken.CredentialStore) *API {
 	api := &API{
 		sync:          sync,
@@ -1724,7 +1676,7 @@ func NewAPI(sync *netsync.SyncManager, wallet *wallet.Wallet, txfeeds *txfeed.Tr
 ​	HTTP requests are sent to corresponding callback functions through router that has been matched successfully. Only handlers related to account will be introduced here, since Eiyaro has too many handler and they are all similar. Here is the code:
 
 
-```
+```go
 func (a *API) buildHandler() {
 	walletEnable := false
 	m := http.NewServeMux()
@@ -1760,7 +1712,7 @@ func (a *API) buildHandler() {
 ​	`http.Server` is an HTTP Service object. It is the basis of HTTP Service work. Here is the code:
 
 
-```
+```go
 func (a *API) initServer(config *cfg.Config) {
 	// ...
 
@@ -1807,10 +1759,8 @@ func (a *API) initServer(config *cfg.Config) {
 
 ​	Use `net.listen` in GoLang library to listen local ports addresses. Here starts a goroutine to run HTTP service due to HTTP service is a persistent working. If there was no error message when running `a.server.Serve`, the `9888` port is started successfully. By now, `ApiServer ` has been waiting for users' requests and starts a goroutine to process each request once received. Here is the code:
 
-
-api/api.go
-
-```
+```go
+//api/api.go
 func (a *API) StartServer(address string) {
 	log.WithField("api address:", address).Info("Rpc listen")
 	listener, err := net.Listen("tcp", address)
@@ -1845,7 +1795,7 @@ func (a *API) StartServer(address string) {
 ​	When starting an HTTP request, we can use `curl` commdline to make an HTTP request to get the network status of the current node. Here is the information of `ApiServer` response: 
 
 
-```
+```console
 $ curl -s http://localhost:9888/net-info|jq .
 {
   "status": "success",
@@ -1864,19 +1814,18 @@ $ curl -s http://localhost:9888/net-info|jq .
 
 ​	Anyalse the process of  `ApiServer` :
 
-
- api/api.go
-
-```
+```go
+//api/api.go
 m.Handle("/net-info", jsonHandler(a.getNetInfo))
 ```
 
 ​	`ApiServer` parses the head of HTTP, matches the path with `/net-info` and jumps to `a.getNetInfo` function.
 
 
- api/nodeinfo.go
+ 
 
-```
+```go
+//api/nodeinfo.go
 func (a *API) getNetInfo() Response {
 	return NewSuccessResponse(a.GetNodeInfo())
 }
@@ -1885,9 +1834,10 @@ func (a *API) getNetInfo() Response {
 ​	`getNetInfo()` function gets the object information by `P2P`, `cpuMinner`, etc. `getNetInfo()` serializes `NetInfo` structure to JSON format and then returns it to users by instantiating `Response`.
 
 
- api/api.go
+ 
 
-```
+```go
+//api/api.go
 type Response struct {
 	Status      string      `json:"status,omitempty"`
 	Code        string      `json:"code,omitempty"`
@@ -2051,7 +2001,7 @@ The complete life cycle of HTTP request:
 ​	Here we use `curl` commandline to call `create-key` to create private key and return it. Here is the code:
 
 
-```
+```console
 $ curl -X POST http://localhost:9888/create-key -d '{ "alias" :"user1" , "password":"123456"}'
 
 {"alias":"user1",
@@ -2119,27 +2069,27 @@ Client | URL
 Go     | http://api.eiyaro.com/
 
 http://api.eiyaro.com/net-info
-```bash
+```json
 {
-"status": "success",
-"data": {
-"listening": true,
-"syncing": true,
-"mining": false,
-"peer_count": 5,
-"current_block": 1499,
-"highest_block": 2373,
-"network_id": "mainnet",
-"version_info": {
-"version": "1.0.1",
-"update": 0,
-"new_version": "1.0.1"
-}
-}
+  "status": "success",
+  "data": {
+    "listening": true,
+    "syncing": true,
+    "mining": false,
+    "peer_count": 5,
+    "current_block": 1499,
+    "highest_block": 2373,
+    "network_id": "mainnet",
+    "version_info": {
+      "version": "1.0.1",
+      "update": 0,
+      "new_version": "1.0.1"
+    }
+  }
 }
 ```
 
-```bash
+```console
 $ go version
 $ go env GOROOT GOPATH
 $ git clone https://github.com/EIYARO-Project/core.git $GOPATH/src/eiyaro/core
@@ -2157,7 +2107,7 @@ A complete request example via `curl`:
 ### Go
 
 The complete request and response are as follows:
-```js
+```console
 // curl -X POST url/method -d data
 curl -X POST http://localhost:9888/create-key -d '{"alias": "alice", "password": "123456", "language": "en"}'
 
